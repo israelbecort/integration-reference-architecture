@@ -196,7 +196,7 @@ docs/
 ├── architecture.md
 ├── diagrams/
 └── decisions/
-
+```
 
 The documentation will include:
 
@@ -226,50 +226,68 @@ Examples:
 
 ADRs will be stored under:
 
-```text
-docs/decisions/
+`docs/decisions/`
 
-🚀 Roadmap
-Phase 1 — Architecture
- Define the business scenario
- Define the high-level architecture
- Create the architecture diagram
- Document integration flows
- Create the first Architecture Decision Records
-Phase 2 — APIs
- Implement Order API
- Define OpenAPI specification
- Implement request validation
- Implement centralized error handling
-Phase 3 — Integration
- Implement Integration Service
- Implement CRM mock
- Implement ERP mock
- Introduce asynchronous messaging
-Phase 4 — Resilience
- Implement retries
- Implement circuit breaker
- Implement dead-letter handling
- Implement idempotency mechanisms
-Phase 5 — Observability
- Implement correlation IDs
- Add structured logging
- Add metrics
- Add distributed tracing
-Phase 6 — Infrastructure
- Containerize services
- Create Docker Compose environment
- Document local deployment
-🚧 Project Status
+---
 
-In development
+## 🚀 Roadmap
+
+### Phase 1 — Architecture
+
+- [x] Define the business scenario
+- [x] Define the high-level architecture
+- [ ] Create the architecture diagram
+- [ ] Document integration flows
+- [ ] Create the first Architecture Decision Records
+
+### Phase 2 — APIs
+
+- [ ] Implement Order API
+- [ ] Define OpenAPI specification
+- [ ] Implement request validation
+- [ ] Implement centralized error handling
+
+### Phase 3 — Integration
+
+- [ ] Implement Integration Service
+- [ ] Implement CRM mock
+- [ ] Implement ERP mock
+- [ ] Introduce asynchronous messaging
+
+### Phase 4 — Resilience
+
+- [ ] Implement retries
+- [ ] Implement circuit breaker
+- [ ] Implement dead-letter handling
+- [ ] Implement idempotency mechanisms
+
+### Phase 5 — Observability
+
+- [ ] Implement correlation IDs
+- [ ] Add structured logging
+- [ ] Add metrics
+- [ ] Add distributed tracing
+
+### Phase 6 — Infrastructure
+
+- [ ] Containerize services
+- [ ] Create Docker Compose environment
+- [ ] Document local deployment
+
+---
+
+## 🚧 Project Status
+
+**In development**
 
 The current phase focuses on architecture definition and integration contracts before implementing the application services.
 
-👤 Author
+---
 
-Israel Becerra Ortiz
+## 👤 Author
+
+**Israel Becerra Ortiz**
 
 Integration Technical Lead focused on enterprise integrations, APIs and integration architecture.
 
-https://www.linkedin.com/in/israelbecerraortiz/
+[LinkedIn](https://www.linkedin.com/in/israelbecerraortiz/)
