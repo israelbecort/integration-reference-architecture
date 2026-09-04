@@ -1,0 +1,507 @@
+openapi: 3.0.3
+
+info:
+  title: Order API
+  version: 1.0.0
+  description: |
+    REST API used to receive orders from the fictional e-commerce platform.
+
+    The API follows a contract-first approach.
+
+    Orders are validated synchronously and accepted for downstream
+    asynchronous processing through the integration architecture.
+
+    This API is part of the Enterprise Integration Reference Architecture
+    portfolio project.
+
+  contact:
+    name: Israel Becerra Ortiz
+    url: https://www.linkedin.com/in/israelbecerraortiz/
+
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development environment
+
+tags:
+  - name: Orders
+    description: Operations related to order processing
+
+paths:
+
+  /api/v1/orders:
+
+    post:
+      tags:
+        - Orders
+
+      summary: Create an order
+
+      description: |
+        Receives a new order from the e-commerce platform.
+
+        The request is validated synchronously and accepted for processing.
+
+        Downstream ERP processing is performed asynchronously.
+
+        For this reason, a successful request returns HTTP 202 Accepted
+        instead of HTTP 201 Created.
+
+      operationId: createOrder
+
+      parameters:
+
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          description: |
+            Identifier used to trace the request across the complete
+            integration flow.
+
+            If the client does not provide one, the Order API will generate it.
+          schema:
+            type: string
+            format: uuid
+          example: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: |
+            Unique identifier used to prevent duplicate order creation
+            when a client retries the same request.
+          schema:
+            type: string
+            format: uuid
+          example: 9fe2d76a-268f-470b-a47f-a3895ab3a189
+
+      requestBody:
+        required: true
+        description: Order information received from the e-commerce platform.
+
+        content:
+
+          application/json:
+
+            schema:
+              $ref: '#/components/schemas/OrderRequest'
+
+            example:
+              externalOrderId: WEB-2026-000123
+
+              customer:
+                customerId: CUST-10045
+                email: customer@example.com
+
+              items:
+                - productId: PROD-001
+                  quantity: 2
+                  unitPrice: 29.95
+
+                - productId: PROD-002
+                  quantity: 1
+                  unitPrice: 15.50
+
+              currency: EUR
+
+              shippingAddress:
+                addressLine1: 123 Example Street
+                city: Seville
+                postalCode: "41001"
+                country: ES
+
+      responses:
+
+        '202':
+          description: |
+            Order successfully validated and accepted for asynchronous processing.
+
+          headers:
+
+            X-Correlation-Id:
+              description: Correlation identifier associated with the request.
+              schema:
+                type: string
+                format: uuid
+              example: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+
+          content:
+
+            application/json:
+
+              schema:
+                $ref: '#/components/schemas/OrderAcceptedResponse'
+
+              example:
+                orderId: 33c58292-f36e-4ca3-a421-c22da73e93e5
+                externalOrderId: WEB-2026-000123
+                status: ACCEPTED
+                correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                acceptedAt: "2026-09-04T20:32:15Z"
+
+        '400':
+          description: Invalid request structure or input data.
+
+          content:
+
+            application/problem+json:
+
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+              example:
+                type: https://example.com/problems/order-validation
+                title: Order validation failed
+                status: 400
+                detail: One or more fields are invalid.
+                instance: /api/v1/orders
+                errorCode: ORD-VALIDATION-001
+                correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                timestamp: "2026-09-04T20:32:15Z"
+
+        '409':
+          description: |
+            The request conflicts with an existing order or
+            an idempotency constraint.
+
+          content:
+
+            application/problem+json:
+
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+              example:
+                type: https://example.com/problems/order-conflict
+                title: Order conflict
+                status: 409
+                detail: An order using the same idempotency key already exists.
+                instance: /api/v1/orders
+                errorCode: ORD-CONFLICT-001
+                correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                timestamp: "2026-09-04T20:32:15Z"
+
+        '422':
+          description: |
+            The request is structurally valid but violates
+            one or more business rules.
+
+          content:
+
+            application/problem+json:
+
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+              example:
+                type: https://example.com/problems/order-business-rule
+                title: Order business validation failed
+                status: 422
+                detail: The order violates a business rule.
+                instance: /api/v1/orders
+                errorCode: ORD-BUSINESS-001
+                correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                timestamp: "2026-09-04T20:32:15Z"
+
+        '503':
+          description: |
+            A required downstream dependency is temporarily unavailable.
+
+          content:
+
+            application/problem+json:
+
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+              example:
+                type: https://example.com/problems/dependency-unavailable
+                title: Downstream service unavailable
+                status: 503
+                detail: A required downstream service is temporarily unavailable.
+                instance: /api/v1/orders
+                errorCode: ORD-DEPENDENCY-001
+                correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                timestamp: "2026-09-04T20:32:15Z"
+
+        '500':
+          description: Unexpected internal server error.
+
+          content:
+
+            application/problem+json:
+
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+              example:
+                type: https://example.com/problems/internal-error
+                title: Internal server error
+                status: 500
+                detail: An unexpected technical error occurred.
+                instance: /api/v1/orders
+                errorCode: ORD-INTERNAL-001
+                correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                timestamp: "2026-09-04T20:32:15Z"
+
+
+components:
+
+  schemas:
+
+    OrderRequest:
+      type: object
+
+      additionalProperties: false
+
+      required:
+        - externalOrderId
+        - customer
+        - items
+        - currency
+        - shippingAddress
+
+      properties:
+
+        externalOrderId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: |
+            Order identifier generated by the source e-commerce platform.
+          example: WEB-2026-000123
+
+        customer:
+          $ref: '#/components/schemas/Customer'
+
+        items:
+          type: array
+          minItems: 1
+          description: Products included in the order.
+
+          items:
+            $ref: '#/components/schemas/OrderItem'
+
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          pattern: '^[A-Z]{3}$'
+          description: ISO 4217 currency code.
+          example: EUR
+
+        shippingAddress:
+          $ref: '#/components/schemas/ShippingAddress'
+
+
+    Customer:
+      type: object
+
+      additionalProperties: false
+
+      required:
+        - customerId
+        - email
+
+      properties:
+
+        customerId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: CUST-10045
+
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          example: customer@example.com
+
+
+    OrderItem:
+      type: object
+
+      additionalProperties: false
+
+      required:
+        - productId
+        - quantity
+        - unitPrice
+
+      properties:
+
+        productId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: PROD-001
+
+        quantity:
+          type: integer
+          minimum: 1
+          example: 2
+
+        unitPrice:
+          type: number
+          format: double
+          minimum: 0.01
+          example: 29.95
+
+
+    ShippingAddress:
+      type: object
+
+      additionalProperties: false
+
+      required:
+        - addressLine1
+        - city
+        - postalCode
+        - country
+
+      properties:
+
+        addressLine1:
+          type: string
+          minLength: 1
+          maxLength: 200
+          example: 123 Example Street
+
+        addressLine2:
+          type: string
+          maxLength: 200
+          example: Apartment 4B
+
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: Seville
+
+        postalCode:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: "41001"
+
+        country:
+          type: string
+          minLength: 2
+          maxLength: 2
+          pattern: '^[A-Z]{2}$'
+          description: ISO 3166-1 alpha-2 country code.
+          example: ES
+
+
+    OrderAcceptedResponse:
+      type: object
+
+      additionalProperties: false
+
+      required:
+        - orderId
+        - externalOrderId
+        - status
+        - correlationId
+        - acceptedAt
+
+      properties:
+
+        orderId:
+          type: string
+          format: uuid
+          description: Internal identifier generated for the order.
+          example: 33c58292-f36e-4ca3-a421-c22da73e93e5
+
+        externalOrderId:
+          type: string
+          example: WEB-2026-000123
+
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+
+        correlationId:
+          type: string
+          format: uuid
+          example: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+
+        acceptedAt:
+          type: string
+          format: date-time
+          example: "2026-09-04T20:32:15Z"
+
+
+    OrderStatus:
+      type: string
+
+      description: Current processing state of the order.
+
+      enum:
+        - ACCEPTED
+        - PROCESSING
+        - COMPLETED
+        - FAILED
+
+      example: ACCEPTED
+
+
+    ProblemDetails:
+      type: object
+
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - instance
+        - errorCode
+        - correlationId
+        - timestamp
+
+      properties:
+
+        type:
+          type: string
+          format: uri
+          description: URI identifying the type of error.
+          example: https://example.com/problems/order-validation
+
+        title:
+          type: string
+          description: Short human-readable description of the error.
+          example: Order validation failed
+
+        status:
+          type: integer
+          format: int32
+          description: HTTP status code.
+          example: 400
+
+        detail:
+          type: string
+          description: Human-readable explanation of the error.
+          example: One or more fields are invalid.
+
+        instance:
+          type: string
+          description: API resource where the error occurred.
+          example: /api/v1/orders
+
+        errorCode:
+          type: string
+          description: Internal functional or technical error code.
+          example: ORD-VALIDATION-001
+
+        correlationId:
+          type: string
+          format: uuid
+          description: Identifier used to trace the failed operation.
+          example: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+
+        timestamp:
+          type: string
+          format: date-time
+          description: Time when the error occurred.
+          example: "2026-09-04T20:32:15Z"
