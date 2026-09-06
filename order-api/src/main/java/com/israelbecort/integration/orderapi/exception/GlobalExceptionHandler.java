@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.http.MediaType;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -103,6 +104,56 @@ public class GlobalExceptionHandler {
         );
 
         return buildResponse(problem, HttpStatus.BAD_REQUEST, correlationId);
+    }
+
+    @ExceptionHandler(OrderConflictException.class)
+    public ResponseEntity<ProblemDetailsResponse> handleOrderConflict(
+            OrderConflictException exception,
+            HttpServletRequest request
+    ) {
+
+        UUID correlationId = resolveCorrelationId(request);
+
+        ProblemDetailsResponse problem = buildProblem(
+                "https://example.com/problems/order-conflict",
+                "Order conflict",
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                request.getRequestURI(),
+                "ORD-CONFLICT-001",
+                correlationId
+        );
+
+        return buildResponse(
+                problem,
+                HttpStatus.CONFLICT,
+                correlationId
+        );
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ProblemDetailsResponse> handleDataIntegrityViolation(
+            DataIntegrityViolationException exception,
+            HttpServletRequest request
+    ) {
+
+        UUID correlationId = resolveCorrelationId(request);
+
+        ProblemDetailsResponse problem = buildProblem(
+                "https://example.com/problems/order-conflict",
+                "Order conflict",
+                HttpStatus.CONFLICT,
+                "The request conflicts with an existing order or idempotency constraint.",
+                request.getRequestURI(),
+                "ORD-CONFLICT-001",
+                correlationId
+        );
+
+        return buildResponse(
+                problem,
+                HttpStatus.CONFLICT,
+                correlationId
+        );
     }
 
     @ExceptionHandler(Exception.class)

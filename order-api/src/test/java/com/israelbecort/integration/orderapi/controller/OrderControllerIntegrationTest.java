@@ -1,5 +1,8 @@
 package com.israelbecort.integration.orderapi.controller;
 
+import com.israelbecort.integration.orderapi.persistence.entity.OrderEntity;
+import com.israelbecort.integration.orderapi.persistence.repository.OrderRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -7,7 +10,10 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.UUID;
+
 import static org.hamcrest.Matchers.matchesPattern;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -25,6 +31,14 @@ class OrderControllerIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private OrderRepository orderRepository;
+
+    @BeforeEach
+    void cleanDatabase() {
+        orderRepository.deleteAll();
+    }
 
     @Test
     void createOrder_shouldReturn202WhenRequestIsValid() throws Exception {
@@ -52,6 +66,11 @@ class OrderControllerIntegrationTest {
                 .andExpect(jsonPath("$.correlationId")
                         .value(CORRELATION_ID))
                 .andExpect(jsonPath("$.acceptedAt").exists());
+
+        assertEquals(
+                1,
+                orderRepository.count()
+        );
     }
 
     @Test
@@ -72,6 +91,11 @@ class OrderControllerIntegrationTest {
                         )
                 ))
                 .andExpect(jsonPath("$.correlationId").exists());
+
+        assertEquals(
+                1,
+                orderRepository.count()
+        );
     }
 
     @Test
@@ -127,6 +151,11 @@ class OrderControllerIntegrationTest {
                         .value("ORD-VALIDATION-001"))
                 .andExpect(jsonPath("$.correlationId")
                         .value(CORRELATION_ID));
+
+        assertEquals(
+                0,
+                orderRepository.count()
+        );
     }
 
     @Test
@@ -147,6 +176,11 @@ class OrderControllerIntegrationTest {
                         .value(400))
                 .andExpect(jsonPath("$.errorCode")
                         .value("ORD-VALIDATION-003"));
+
+        assertEquals(
+                0,
+                orderRepository.count()
+        );
     }
 
     @Test
@@ -174,6 +208,141 @@ class OrderControllerIntegrationTest {
                         .value(400))
                 .andExpect(jsonPath("$.errorCode")
                         .value("ORD-VALIDATION-002"));
+
+        assertEquals(
+                0,
+                orderRepository.count()
+        );
+    }
+
+    @Test
+    void createOrder_shouldReturnSameOrderWhenIdempotencyKeyIsReused()
+            throws Exception {
+
+        mockMvc.perform(
+                        post(ORDERS_URL)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .header("X-Correlation-Id", CORRELATION_ID)
+                                .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                                .content(validOrderRequest())
+                )
+                .andExpect(status().isAccepted());
+
+        OrderEntity persistedOrder =
+                orderRepository
+                        .findByIdempotencyKey(
+                                UUID.fromString(IDEMPOTENCY_KEY)
+                        )
+                        .orElseThrow();
+
+        mockMvc.perform(
+                        post(ORDERS_URL)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .header("X-Correlation-Id", CORRELATION_ID)
+                                .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                                .content(validOrderRequest())
+                )
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.orderId")
+                        .value(
+                                persistedOrder
+                                        .getOrderId()
+                                        .toString()
+                        ))
+                .andExpect(jsonPath("$.acceptedAt")
+                        .value(
+                                persistedOrder
+                                        .getAcceptedAt()
+                                        .toString()
+                        ));
+
+        assertEquals(
+                1,
+                orderRepository.count()
+        );
+    }
+
+    @Test
+    void createOrder_shouldReturn409WhenIdempotencyKeyIsReusedWithDifferentRequest()
+            throws Exception {
+
+        mockMvc.perform(
+                        post(ORDERS_URL)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .header("X-Correlation-Id", CORRELATION_ID)
+                                .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                                .content(validOrderRequest())
+                )
+                .andExpect(status().isAccepted());
+
+        String differentRequest =
+                validOrderRequest()
+                        .replace(
+                                "WEB-2026-000123",
+                                "WEB-2026-000999"
+                        );
+
+        mockMvc.perform(
+                        post(ORDERS_URL)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .header("X-Correlation-Id", CORRELATION_ID)
+                                .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                                .content(differentRequest)
+                )
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(
+                        MediaType.APPLICATION_PROBLEM_JSON
+                ))
+                .andExpect(jsonPath("$.status")
+                        .value(409))
+                .andExpect(jsonPath("$.errorCode")
+                        .value("ORD-CONFLICT-001"));
+
+        assertEquals(
+                1,
+                orderRepository.count()
+        );
+    }
+
+    @Test
+    void createOrder_shouldReturn409WhenExternalOrderIdAlreadyExists()
+            throws Exception {
+
+        mockMvc.perform(
+                        post(ORDERS_URL)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .header("X-Correlation-Id", CORRELATION_ID)
+                                .header("Idempotency-Key", IDEMPOTENCY_KEY)
+                                .content(validOrderRequest())
+                )
+                .andExpect(status().isAccepted());
+
+        String anotherIdempotencyKey =
+                "8ec03111-4bfc-4d52-a226-506741701d13";
+
+        mockMvc.perform(
+                        post(ORDERS_URL)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .header("X-Correlation-Id", CORRELATION_ID)
+                                .header(
+                                        "Idempotency-Key",
+                                        anotherIdempotencyKey
+                                )
+                                .content(validOrderRequest())
+                )
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith(
+                        MediaType.APPLICATION_PROBLEM_JSON
+                ))
+                .andExpect(jsonPath("$.status")
+                        .value(409))
+                .andExpect(jsonPath("$.errorCode")
+                        .value("ORD-CONFLICT-001"));
+
+        assertEquals(
+                1,
+                orderRepository.count()
+        );
     }
 
     private String validOrderRequest() {

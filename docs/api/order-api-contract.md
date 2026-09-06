@@ -2,11 +2,30 @@
 
 ## Overview
 
-The Order API provides the entry point for creating orders in the integration ecosystem.
+The Order API is the entry point for order creation within the enterprise integration platform.
 
-The API follows a contract-first approach.
+It receives orders from the fictional e-commerce system through a synchronous REST interface.
 
-Orders are accepted synchronously through a REST API while downstream ERP processing is performed asynchronously.
+The API follows a contract-first approach and is responsible for:
+
+- Request validation
+- Correlation identifier handling
+- Idempotent order creation
+- Initial order acceptance
+- Consistent HTTP responses
+- Consistent error responses
+
+Downstream ERP processing will be performed asynchronously by other components of the integration architecture.
+
+For this reason, successful order creation requests return:
+
+`202 Accepted`
+
+rather than:
+
+`201 Created`
+
+The response confirms that the order has been accepted by the platform, not that all downstream business processing has completed.
 
 ---
 
@@ -22,33 +41,62 @@ Orders are accepted synchronously through a REST API while downstream ERP proces
 
 ---
 
-## Headers
+## Request Headers
 
-### X-Correlation-Id
+### `X-Correlation-Id`
 
 Optional.
 
-Used to trace the request across the complete integration flow.
+Used to trace an individual request across the integration platform.
 
-If the client does not provide a correlation identifier, the Order API will generate one.
-
-Example:
-
-`X-Correlation-Id: b37166f4-8a39-4ffd-9599-c42ca48b83d0`
-
-### Idempotency-Key
-
-Required.
-
-Used to prevent duplicate order creation when clients retry the same request.
+The value must be a valid UUID.
 
 Example:
 
-`Idempotency-Key: 9fe2d76a-268f-470b-a47f-a3895ab3a189`
+```text
+X-Correlation-Id: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+```
+
+If the caller provides the header, the Order API propagates the same correlation identifier.
+
+If the caller does not provide the header, the Order API generates a new correlation identifier.
+
+The effective correlation identifier is returned both:
+
+- In the response header
+- In the response body
+
+Example response header:
+
+```text
+X-Correlation-Id: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+```
 
 ---
 
-## Request
+### `Idempotency-Key`
+
+Required.
+
+Used to make order creation safe to retry.
+
+The value must be a valid UUID.
+
+Example:
+
+```text
+Idempotency-Key: 9fe2d76a-268f-470b-a47f-a3895ab3a189
+```
+
+The same idempotency key must be reused when retrying the same order creation operation.
+
+The idempotency key must not be reused for a different request.
+
+---
+
+## Request Body
+
+Example:
 
 ```json
 {
@@ -81,49 +129,267 @@ Example:
 
 ---
 
-## Request Validation
+## Request Fields
 
 ### `externalOrderId`
 
-Must be provided and must not be empty.
+Required.
 
-### `customer.customerId`
+Identifier assigned by the source e-commerce platform.
 
-Must be provided.
+Requirements:
 
-### `customer.email`
+- Must not be empty
+- Maximum length: 100 characters
+- Must be unique across orders
 
-Must contain a valid email address.
+Example:
 
-### `items`
-
-Must contain at least one item.
-
-### `items[].productId`
-
-Must be provided.
-
-### `items[].quantity`
-
-Must be greater than zero.
-
-### `items[].unitPrice`
-
-Must be greater than zero.
-
-### `currency`
-
-Must contain a valid three-character ISO currency code.
-
-### `shippingAddress`
-
-Must contain the required address information.
+```text
+WEB-2026-000123
+```
 
 ---
 
-## Successful Response
+### `customer`
 
-Because downstream order processing is asynchronous, the API returns:
+Required.
+
+Contains the customer information required during order creation.
+
+---
+
+### `customer.customerId`
+
+Required.
+
+Identifier of the customer in the source or enterprise ecosystem.
+
+Requirements:
+
+- Must not be empty
+- Maximum length: 100 characters
+
+Example:
+
+```text
+CUST-10045
+```
+
+---
+
+### `customer.email`
+
+Required.
+
+Customer email address.
+
+Requirements:
+
+- Must not be empty
+- Must contain a valid email format
+- Maximum length: 254 characters
+
+Example:
+
+```text
+customer@example.com
+```
+
+---
+
+### `items`
+
+Required.
+
+Collection of products included in the order.
+
+Requirements:
+
+- Must contain at least one item
+
+---
+
+### `items[].productId`
+
+Required.
+
+Identifier of the product.
+
+Requirements:
+
+- Must not be empty
+- Maximum length: 100 characters
+
+Example:
+
+```text
+PROD-001
+```
+
+---
+
+### `items[].quantity`
+
+Required.
+
+Number of product units.
+
+Requirements:
+
+- Must be an integer
+- Must be greater than zero
+
+Example:
+
+```text
+2
+```
+
+---
+
+### `items[].unitPrice`
+
+Required.
+
+Price per product unit.
+
+Requirements:
+
+- Must be greater than or equal to `0.01`
+
+Example:
+
+```text
+29.95
+```
+
+---
+
+### `currency`
+
+Required.
+
+ISO 4217 currency code.
+
+Requirements:
+
+- Exactly three uppercase alphabetic characters
+
+Examples:
+
+```text
+EUR
+USD
+GBP
+```
+
+---
+
+### `shippingAddress`
+
+Required.
+
+Contains the shipping destination associated with the order.
+
+---
+
+### `shippingAddress.addressLine1`
+
+Required.
+
+Requirements:
+
+- Must not be empty
+- Maximum length: 200 characters
+
+Example:
+
+```text
+123 Example Street
+```
+
+---
+
+### `shippingAddress.addressLine2`
+
+Optional.
+
+Maximum length:
+
+```text
+200 characters
+```
+
+Example:
+
+```text
+Apartment 4B
+```
+
+---
+
+### `shippingAddress.city`
+
+Required.
+
+Requirements:
+
+- Must not be empty
+- Maximum length: 100 characters
+
+Example:
+
+```text
+Seville
+```
+
+---
+
+### `shippingAddress.postalCode`
+
+Required.
+
+Requirements:
+
+- Must not be empty
+- Maximum length: 20 characters
+
+Example:
+
+```text
+41001
+```
+
+---
+
+### `shippingAddress.country`
+
+Required.
+
+ISO 3166-1 alpha-2 country code.
+
+Requirements:
+
+- Exactly two uppercase alphabetic characters
+
+Examples:
+
+```text
+ES
+FR
+DE
+```
+
+---
+
+# Successful Processing
+
+## New Order
+
+When the request is valid and the `Idempotency-Key` has not been used before, the platform creates and accepts a new order.
+
+Response:
 
 `202 Accepted`
 
@@ -131,41 +397,277 @@ Example:
 
 ```json
 {
-  "orderId": "33c58292-f36e-4ca3-a421-c22da73e93e5",
+  "orderId": "b243423f-8047-49ea-b79f-50027400c022",
   "externalOrderId": "WEB-2026-000123",
   "status": "ACCEPTED",
-  "correlationId": "b37166f4-8a39-4ffd-9599-c42ca48b83d0",
-  "acceptedAt": "2026-09-04T20:32:15Z"
+  "correlationId": "11111111-1111-4111-8111-111111111111",
+  "acceptedAt": "2026-09-05T13:40:24.946179Z"
+}
+```
+
+Response header:
+
+```text
+X-Correlation-Id: 11111111-1111-4111-8111-111111111111
+```
+
+---
+
+## Idempotent Retry
+
+A client may retry the same request using the same `Idempotency-Key`.
+
+Example:
+
+```text
+First request
+
+Idempotency-Key: ABC
+Request: A
+
+        ↓
+
+ORDER-123
+```
+
+If the client retries:
+
+```text
+Idempotency-Key: ABC
+Request: A
+
+        ↓
+
+Same ORDER-123
+```
+
+The platform must not create another order.
+
+The retry returns:
+
+`202 Accepted`
+
+with the same:
+
+- `orderId`
+- `externalOrderId`
+- `status`
+- `acceptedAt`
+
+The retry may use a different `X-Correlation-Id`.
+
+Example:
+
+```text
+First request
+
+Idempotency-Key = ABC
+Correlation-Id = 111
+
+        ↓
+
+ORDER-123
+```
+
+Retry:
+
+```text
+Idempotency-Key = ABC
+Correlation-Id = 222
+
+        ↓
+
+Same ORDER-123
+```
+
+The retry response contains the correlation identifier associated with the current request.
+
+Example:
+
+```json
+{
+  "orderId": "b243423f-8047-49ea-b79f-50027400c022",
+  "externalOrderId": "WEB-2026-000123",
+  "status": "ACCEPTED",
+  "correlationId": "22222222-2222-4222-8222-222222222222",
+  "acceptedAt": "2026-09-05T13:40:24.946179Z"
 }
 ```
 
 ---
 
-## Order Status
+# Idempotency Semantics
 
-The order lifecycle may contain the following states:
+The API uses both:
 
-### `ACCEPTED`
+```text
+Idempotency-Key
+```
 
-The request has been successfully validated and accepted for processing.
+and a deterministic request fingerprint.
 
-### `PROCESSING`
+The request fingerprint is calculated using SHA-256 from the business-relevant request content.
 
-Downstream systems are processing the order.
+This allows the platform to determine whether an incoming request is:
 
-### `COMPLETED`
+- A legitimate retry
+- An incorrect reuse of an existing idempotency key
+
+---
+
+## Scenario 1 — New Key
+
+```text
+Idempotency-Key = ABC
+Request = A
+
+        ↓
+
+New order created
+
+        ↓
+
+202 Accepted
+```
+
+---
+
+## Scenario 2 — Same Key and Same Request
+
+```text
+Idempotency-Key = ABC
+Request = A
+
+        ↓
+
+Existing operation found
+
+        ↓
+
+Request fingerprint matches
+
+        ↓
+
+Return existing order
+
+        ↓
+
+202 Accepted
+```
+
+No duplicate order is created.
+
+---
+
+## Scenario 3 — Same Key and Different Request
+
+```text
+Existing operation:
+
+Idempotency-Key = ABC
+Request = A
+```
+
+Later:
+
+```text
+Idempotency-Key = ABC
+Request = B
+
+        ↓
+
+Request fingerprint differs
+
+        ↓
+
+409 Conflict
+```
+
+The platform rejects the request.
+
+Error code:
+
+```text
+ORD-CONFLICT-001
+```
+
+---
+
+## Scenario 4 — Same External Order ID with Different Key
+
+Example:
+
+```text
+First request:
+
+externalOrderId = WEB-2026-000123
+Idempotency-Key = ABC
+
+        ↓
+
+202 Accepted
+```
+
+Later:
+
+```text
+externalOrderId = WEB-2026-000123
+Idempotency-Key = XYZ
+
+        ↓
+
+409 Conflict
+```
+
+The source order identifier must not be associated with multiple internal orders.
+
+Error code:
+
+```text
+ORD-CONFLICT-001
+```
+
+---
+
+# Order Status
+
+The order lifecycle currently defines the following states.
+
+## `ACCEPTED`
+
+The order has been validated and accepted by the platform.
+
+Downstream processing may not yet have completed.
+
+---
+
+## `PROCESSING`
+
+The order is being processed by downstream systems.
+
+---
+
+## `COMPLETED`
 
 The order has been successfully processed.
 
-### `FAILED`
+---
+
+## `FAILED`
 
 The order could not be processed successfully.
 
 ---
 
-## Error Responses
+# Error Model
 
-The API uses a consistent error model.
+The API uses a consistent error representation.
+
+Error responses use:
+
+```text
+Content-Type: application/problem+json
+```
 
 Example:
 
@@ -178,101 +680,158 @@ Example:
   "instance": "/api/v1/orders",
   "errorCode": "ORD-VALIDATION-001",
   "correlationId": "b37166f4-8a39-4ffd-9599-c42ca48b83d0",
-  "timestamp": "2026-09-04T20:32:15Z"
+  "timestamp": "2026-09-05T09:14:53.518186Z"
+}
+```
+
+The response also contains:
+
+```text
+X-Correlation-Id
+```
+
+to support request tracing.
+
+---
+
+# HTTP Status Codes
+
+## `202 Accepted`
+
+The request has been accepted for processing.
+
+Used for:
+
+- New order creation
+- Legitimate retry using the same `Idempotency-Key` and equivalent request
+
+A legitimate idempotent retry returns the previously created order instead of creating another one.
+
+---
+
+## `400 Bad Request`
+
+The request cannot be processed because its structure, headers or input data are invalid.
+
+Possible causes include:
+
+- Missing mandatory field
+- Invalid email
+- Invalid quantity
+- Invalid unit price
+- Invalid currency
+- Invalid country
+- Malformed JSON
+- Missing `Idempotency-Key`
+- Invalid UUID header format
+
+Example error codes:
+
+```text
+ORD-VALIDATION-001
+ORD-VALIDATION-002
+ORD-VALIDATION-003
+ORD-VALIDATION-004
+```
+
+---
+
+## `409 Conflict`
+
+The request conflicts with an existing order or idempotency constraint.
+
+Possible causes include:
+
+### Same Idempotency Key with Different Request
+
+```text
+Idempotency-Key already exists
++
+request fingerprint is different
+```
+
+### Duplicate External Order
+
+```text
+externalOrderId already exists
++
+different Idempotency-Key
+```
+
+Error code:
+
+```text
+ORD-CONFLICT-001
+```
+
+Example:
+
+```json
+{
+  "type": "https://example.com/problems/order-conflict",
+  "title": "Order conflict",
+  "status": 409,
+  "detail": "The Idempotency-Key has already been used with a different request.",
+  "instance": "/api/v1/orders",
+  "errorCode": "ORD-CONFLICT-001",
+  "correlationId": "b37166f4-8a39-4ffd-9599-c42ca48b83d0",
+  "timestamp": "2026-09-05T13:45:00Z"
 }
 ```
 
 ---
 
-## HTTP Status Codes
-
-### `400 Bad Request`
-
-The request structure or input data is invalid.
-
-Examples:
-
-- Missing mandatory fields
-- Invalid email format
-- Invalid quantity
-- Invalid currency format
-- Malformed JSON
-
-### `409 Conflict`
-
-The request conflicts with an existing order or idempotency constraint.
-
-Examples:
-
-- The same `Idempotency-Key` has already been processed
-- The same external order has already been registered
-
-### `422 Unprocessable Entity`
+## `422 Unprocessable Entity`
 
 The request is structurally valid but violates a business rule.
 
-Examples:
+Potential future examples include:
 
-- Product cannot be ordered
+- Product is not available for ordering
 - Customer is not eligible to place the order
-- Unsupported business condition
+- Order violates a business restriction
 
-### `503 Service Unavailable`
+Business rule validation will evolve as downstream integrations are introduced.
 
-A required downstream dependency is temporarily unavailable.
+---
 
-Example:
+## `503 Service Unavailable`
 
-- CRM is unavailable and the synchronous operation cannot be completed
+A required synchronous downstream dependency is temporarily unavailable.
 
-### `500 Internal Server Error`
+This status will become relevant when the Order API is connected to the Integration Service and required synchronous integrations.
+
+---
+
+## `500 Internal Server Error`
 
 An unexpected technical error occurred.
 
 Internal implementation details must not be exposed to API consumers.
 
----
-
-## Idempotency
-
-Order creation must be idempotent.
-
-The client must provide an `Idempotency-Key` header for every order creation request.
-
-If the same request is retried using the same idempotency key, the platform must prevent duplicate order creation.
-
-Example:
+Error code:
 
 ```text
-Request 1
-
-POST /api/v1/orders
-Idempotency-Key: 9fe2d76a-268f-470b-a47f-a3895ab3a189
-
-→ Order accepted
+ORD-INTERNAL-001
 ```
-
-If the client retries:
-
-```text
-Request 2
-
-POST /api/v1/orders
-Idempotency-Key: 9fe2d76a-268f-470b-a47f-a3895ab3a189
-
-→ Existing operation detected
-→ Duplicate order must not be created
-```
-
-The exact implementation strategy will be defined in a dedicated Architecture Decision Record.
 
 ---
 
-## Correlation and Traceability
+# Correlation and Traceability
 
-Every request must have a correlation identifier.
+Every request has an effective correlation identifier.
 
-The correlation identifier will be propagated across the complete integration flow:
+If the caller provides:
+
+```text
+X-Correlation-Id
+```
+
+the platform propagates it.
+
+If the caller does not provide one, the Order API generates a new UUID.
+
+The identifier will progressively be propagated across:
 
 ```text
 E-Commerce
@@ -288,111 +847,228 @@ Kafka
 ERP
 ```
 
-If the caller provides an `X-Correlation-Id`, the platform will propagate it.
+The correlation identifier will be used in:
 
-If the caller does not provide one, the Order API will generate a new identifier.
-
-The correlation identifier must also be included in:
-
+- HTTP headers
+- API responses
 - Application logs
-- Error responses
-- Internal HTTP calls
-- Published events
-- Downstream processing
+- Internal HTTP communication
+- Events
+- Metrics
+- Distributed tracing
 
 ---
 
-## Processing Model
+# Correlation ID vs Idempotency Key
 
-The Order API uses a hybrid processing model.
+These identifiers serve different purposes.
 
-### Synchronous processing
+## `Idempotency-Key`
 
-The following operations happen before the API returns a response:
+Identifies the business operation being retried.
 
-1. Request validation
-2. Correlation ID handling
-3. Idempotency validation
-4. Forwarding the request to the Integration Service
-5. Required synchronous CRM interaction
-6. Acceptance of the order for asynchronous processing
+Example:
 
-### Asynchronous processing
+```text
+Create order operation
+        ↓
+Idempotency-Key = ABC
+```
 
-The following operations happen after the order has been accepted:
+Retries of the same operation reuse:
 
-1. Order event publication
-2. Kafka message delivery
-3. ERP consumption
-4. ERP order processing
-5. Final order status update
+```text
+ABC
+```
 
-For this reason, the API returns:
+---
+
+## `X-Correlation-Id`
+
+Identifies and traces an individual request attempt.
+
+Example:
+
+```text
+Attempt 1
+Correlation-Id = 111
+
+Attempt 2
+Correlation-Id = 222
+```
+
+Both attempts may belong to:
+
+```text
+Idempotency-Key = ABC
+```
+
+and therefore resolve to the same order.
+
+---
+
+# Processing Model
+
+The API follows a hybrid synchronous and asynchronous architecture.
+
+## Current Synchronous Responsibilities
+
+The Order API currently performs:
+
+1. HTTP request parsing
+2. Header validation
+3. Request validation
+4. Correlation ID handling
+5. Idempotency verification
+6. Initial order persistence
+7. Order acceptance
+
+---
+
+## Future Synchronous Responsibilities
+
+When the Integration Service is introduced, required synchronous enterprise interactions may occur before the order is accepted for downstream processing.
+
+---
+
+## Future Asynchronous Responsibilities
+
+The architecture will later introduce:
+
+```text
+Integration Service
+        ↓
+Kafka
+        ↓
+ERP
+```
+
+ERP processing will therefore not block the original HTTP request.
+
+This is why the API returns:
 
 `202 Accepted`
 
-instead of:
-
-`201 Created`
-
-The response confirms that the order has been accepted for processing, not that all downstream business processing has completed.
+rather than indicating that all downstream processing has completed.
 
 ---
 
-## Design Principles
+# Persistence and Idempotency
+
+Idempotency is persistent.
+
+It does not depend on application memory.
+
+The platform currently stores information including:
+
+- Internal order identifier
+- External order identifier
+- Idempotency key
+- SHA-256 request fingerprint
+- Order status
+- Original correlation identifier
+- Acceptance timestamp
+
+Database uniqueness constraints protect:
+
+```text
+idempotency_key
+```
+
+and:
+
+```text
+external_order_id
+```
+
+These constraints provide a final consistency boundary against duplicate order creation.
+
+---
+
+# Design Principles
 
 The Order API follows these principles:
 
 - Contract-first API design
-- Consistent error responses
-- Request traceability
 - Idempotent order creation
+- Persistent duplicate protection
+- Request traceability
+- Consistent error responses
+- Explicit HTTP semantics
+- Separation between API and persistence models
 - Separation between API exposure and integration orchestration
-- Asynchronous downstream processing
-- Clear responsibility boundaries
-- No exposure of internal implementation details
+- Database-enforced consistency
 - Resilience by design
 - Observability by design
+- No exposure of internal implementation details
 
 ---
 
-## Future Extensions
+# Future Operations
 
-Future versions of the API may include:
+The following operations may be introduced later.
 
-### Get Order Status
+## Get Order Status
 
-`GET /api/v1/orders/{orderId}`
+```text
+GET /api/v1/orders/{orderId}
+```
 
-Possible response states:
+Potential response states:
 
-- `ACCEPTED`
-- `PROCESSING`
-- `COMPLETED`
-- `FAILED`
-
-### Cancel Order
-
-`POST /api/v1/orders/{orderId}/cancel`
-
-### Order Search
-
-`GET /api/v1/orders`
-
-These operations are outside the scope of the first implementation phase.
+```text
+ACCEPTED
+PROCESSING
+COMPLETED
+FAILED
+```
 
 ---
 
-## Related Documentation
+## Cancel Order
+
+```text
+POST /api/v1/orders/{orderId}/cancel
+```
+
+---
+
+## Search Orders
+
+```text
+GET /api/v1/orders
+```
+
+These operations are outside the scope of the current implementation phase.
+
+---
+
+# Related Documentation
 
 Architecture overview:
 
 `docs/architecture.md`
 
-Architecture decisions:
+OpenAPI specification:
+
+`docs/api/order-api.yaml`
+
+Event documentation:
+
+`docs/events/order-created-event.md`
+
+AsyncAPI specification:
+
+`docs/events/asyncapi.yaml`
+
+Architecture Decision Records:
 
 `docs/decisions/`
 
-The synchronous and asynchronous communication strategy is documented in:
+Synchronous and asynchronous communication decision:
 
 `docs/decisions/ADR-001-synchronous-vs-asynchronous-integration.md`
+
+Order creation idempotency decision:
+
+`docs/decisions/ADR-002-idempotency-strategy.md`
