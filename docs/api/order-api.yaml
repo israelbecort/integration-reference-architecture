@@ -2,17 +2,26 @@ openapi: 3.0.3
 
 info:
   title: Order API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     REST API used to receive orders from the fictional e-commerce platform.
 
-    The API follows a contract-first approach.
+    The API follows a contract-first approach and provides:
 
-    Orders are validated synchronously and accepted for downstream
-    asynchronous processing through the integration architecture.
+    - Request validation
+    - Correlation identifier handling
+    - Persistent idempotent order creation
+    - Initial order persistence
+    - Consistent error responses
 
-    This API is part of the Enterprise Integration Reference Architecture
-    portfolio project.
+    Orders are accepted synchronously through this REST API.
+
+    Downstream ERP processing will be performed asynchronously by other
+    components of the integration architecture.
+
+    A successful response therefore returns HTTP 202 Accepted and confirms
+    that the order has been accepted by the platform, not that all downstream
+    business processing has completed.
 
   contact:
     name: Israel Becerra Ortiz
@@ -39,43 +48,33 @@ paths:
 
       summary: Create an order
 
+      operationId: createOrder
+
       description: |
         Receives a new order from the e-commerce platform.
 
-        The request is validated synchronously and accepted for processing.
+        The operation is idempotent.
 
-        Downstream ERP processing is performed asynchronously.
+        The client must provide an Idempotency-Key header.
 
-        For this reason, a successful request returns HTTP 202 Accepted
-        instead of HTTP 201 Created.
+        If the same Idempotency-Key is reused with an equivalent request,
+        the previously created order is returned and no duplicate order
+        is created.
 
-      operationId: createOrder
+        If the same Idempotency-Key is reused with different request data,
+        the API returns HTTP 409 Conflict.
+
+        If the same externalOrderId already exists under another
+        Idempotency-Key, the API also returns HTTP 409 Conflict.
+
+        Successful requests return HTTP 202 Accepted because downstream
+        order processing will be performed asynchronously.
 
       parameters:
 
-        - name: X-Correlation-Id
-          in: header
-          required: false
-          description: |
-            Identifier used to trace the request across the complete
-            integration flow.
+        - $ref: '#/components/parameters/CorrelationIdHeader'
 
-            If the client does not provide one, the Order API will generate it.
-          schema:
-            type: string
-            format: uuid
-          example: b37166f4-8a39-4ffd-9599-c42ca48b83d0
-
-        - name: Idempotency-Key
-          in: header
-          required: true
-          description: |
-            Unique identifier used to prevent duplicate order creation
-            when a client retries the same request.
-          schema:
-            type: string
-            format: uuid
-          example: 9fe2d76a-268f-470b-a47f-a3895ab3a189
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
 
       requestBody:
         required: true
@@ -116,16 +115,21 @@ paths:
 
         '202':
           description: |
-            Order successfully validated and accepted for asynchronous processing.
+            Order accepted for processing.
+
+            This response is returned in two scenarios:
+
+            1. A new order has been successfully created and accepted.
+            2. The request is a legitimate idempotent retry using the same
+               Idempotency-Key and equivalent request data.
+
+            For an idempotent retry, no duplicate order is created and the
+            existing order is returned.
 
           headers:
 
             X-Correlation-Id:
-              description: Correlation identifier associated with the request.
-              schema:
-                type: string
-                format: uuid
-              example: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+              $ref: '#/components/headers/CorrelationIdResponseHeader'
 
           content:
 
@@ -134,15 +138,37 @@ paths:
               schema:
                 $ref: '#/components/schemas/OrderAcceptedResponse'
 
-              example:
-                orderId: 33c58292-f36e-4ca3-a421-c22da73e93e5
-                externalOrderId: WEB-2026-000123
-                status: ACCEPTED
-                correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
-                acceptedAt: "2026-09-04T20:32:15Z"
+              examples:
+
+                newOrder:
+                  summary: New order accepted
+
+                  value:
+                    orderId: b243423f-8047-49ea-b79f-50027400c022
+                    externalOrderId: WEB-2026-000123
+                    status: ACCEPTED
+                    correlationId: 11111111-1111-4111-8111-111111111111
+                    acceptedAt: "2026-09-05T13:40:24.946179Z"
+
+                idempotentRetry:
+                  summary: Existing order returned after a legitimate retry
+
+                  value:
+                    orderId: b243423f-8047-49ea-b79f-50027400c022
+                    externalOrderId: WEB-2026-000123
+                    status: ACCEPTED
+                    correlationId: 22222222-2222-4222-8222-222222222222
+                    acceptedAt: "2026-09-05T13:40:24.946179Z"
 
         '400':
-          description: Invalid request structure or input data.
+          description: |
+            The request cannot be processed because its structure,
+            headers or input data are invalid.
+
+          headers:
+
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationIdResponseHeader'
 
           content:
 
@@ -151,20 +177,77 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
 
-              example:
-                type: https://example.com/problems/order-validation
-                title: Order validation failed
-                status: 400
-                detail: One or more fields are invalid.
-                instance: /api/v1/orders
-                errorCode: ORD-VALIDATION-001
-                correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
-                timestamp: "2026-09-04T20:32:15Z"
+              examples:
+
+                validationError:
+                  summary: Request validation error
+
+                  value:
+                    type: https://example.com/problems/order-validation
+                    title: Order validation failed
+                    status: 400
+                    detail: One or more fields are invalid.
+                    instance: /api/v1/orders
+                    errorCode: ORD-VALIDATION-001
+                    correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                    timestamp: "2026-09-05T09:14:53.518186Z"
+
+                malformedJson:
+                  summary: Malformed JSON request
+
+                  value:
+                    type: https://example.com/problems/order-validation
+                    title: Order validation failed
+                    status: 400
+                    detail: The request body is malformed or contains invalid data.
+                    instance: /api/v1/orders
+                    errorCode: ORD-VALIDATION-002
+                    correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                    timestamp: "2026-09-05T09:14:53.518186Z"
+
+                missingHeader:
+                  summary: Required Idempotency-Key header missing
+
+                  value:
+                    type: https://example.com/problems/order-validation
+                    title: Required header missing
+                    status: 400
+                    detail: Required header 'Idempotency-Key' is missing.
+                    instance: /api/v1/orders
+                    errorCode: ORD-VALIDATION-003
+                    correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                    timestamp: "2026-09-05T09:14:53.518186Z"
+
+                invalidHeaderFormat:
+                  summary: Invalid UUID header format
+
+                  value:
+                    type: https://example.com/problems/order-validation
+                    title: Invalid request value
+                    status: 400
+                    detail: One or more request values have an invalid format.
+                    instance: /api/v1/orders
+                    errorCode: ORD-VALIDATION-004
+                    correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                    timestamp: "2026-09-05T09:14:53.518186Z"
 
         '409':
           description: |
             The request conflicts with an existing order or
-            an idempotency constraint.
+            idempotency constraint.
+
+            This response is returned when:
+
+            - The same Idempotency-Key is reused with different request data.
+            - The externalOrderId already exists under another Idempotency-Key.
+
+            Reusing the same Idempotency-Key with the same request does not
+            produce a conflict and returns HTTP 202 Accepted instead.
+
+          headers:
+
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationIdResponseHeader'
 
           content:
 
@@ -173,20 +256,46 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
 
-              example:
-                type: https://example.com/problems/order-conflict
-                title: Order conflict
-                status: 409
-                detail: An order using the same idempotency key already exists.
-                instance: /api/v1/orders
-                errorCode: ORD-CONFLICT-001
-                correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
-                timestamp: "2026-09-04T20:32:15Z"
+              examples:
+
+                idempotencyConflict:
+                  summary: Idempotency-Key reused with different request data
+
+                  value:
+                    type: https://example.com/problems/order-conflict
+                    title: Order conflict
+                    status: 409
+                    detail: The Idempotency-Key has already been used with a different request.
+                    instance: /api/v1/orders
+                    errorCode: ORD-CONFLICT-001
+                    correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                    timestamp: "2026-09-05T13:45:00Z"
+
+                duplicateExternalOrder:
+                  summary: Existing external order identifier
+
+                  value:
+                    type: https://example.com/problems/order-conflict
+                    title: Order conflict
+                    status: 409
+                    detail: An order with the same externalOrderId already exists.
+                    instance: /api/v1/orders
+                    errorCode: ORD-CONFLICT-001
+                    correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+                    timestamp: "2026-09-05T13:45:00Z"
 
         '422':
           description: |
-            The request is structurally valid but violates
-            one or more business rules.
+            The request is structurally valid but violates one or more
+            business rules.
+
+            Business-rule validation will evolve as additional enterprise
+            integrations are introduced.
+
+          headers:
+
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationIdResponseHeader'
 
           content:
 
@@ -203,11 +312,20 @@ paths:
                 instance: /api/v1/orders
                 errorCode: ORD-BUSINESS-001
                 correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
-                timestamp: "2026-09-04T20:32:15Z"
+                timestamp: "2026-09-05T13:45:00Z"
 
         '503':
           description: |
-            A required downstream dependency is temporarily unavailable.
+            A required synchronous downstream dependency is temporarily
+            unavailable.
+
+            This response will become relevant when synchronous enterprise
+            integrations are introduced.
+
+          headers:
+
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationIdResponseHeader'
 
           content:
 
@@ -224,10 +342,15 @@ paths:
                 instance: /api/v1/orders
                 errorCode: ORD-DEPENDENCY-001
                 correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
-                timestamp: "2026-09-04T20:32:15Z"
+                timestamp: "2026-09-05T13:45:00Z"
 
         '500':
           description: Unexpected internal server error.
+
+          headers:
+
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationIdResponseHeader'
 
           content:
 
@@ -244,10 +367,75 @@ paths:
                 instance: /api/v1/orders
                 errorCode: ORD-INTERNAL-001
                 correlationId: b37166f4-8a39-4ffd-9599-c42ca48b83d0
-                timestamp: "2026-09-04T20:32:15Z"
+                timestamp: "2026-09-05T13:45:00Z"
 
 
 components:
+
+  parameters:
+
+    CorrelationIdHeader:
+      name: X-Correlation-Id
+      in: header
+      required: false
+
+      description: |
+        UUID used to trace an individual request across the integration
+        platform.
+
+        If the client provides a correlation identifier, the platform
+        propagates it.
+
+        If the header is not provided, the Order API generates a new UUID.
+
+        A retry may use a different X-Correlation-Id while retaining the same
+        Idempotency-Key.
+
+      schema:
+        type: string
+        format: uuid
+
+      example: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+
+
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: true
+
+      description: |
+        UUID that identifies the order creation operation.
+
+        Clients must reuse the same value when retrying the same operation.
+
+        Same key + equivalent request:
+        the existing order is returned with HTTP 202 Accepted.
+
+        Same key + different request:
+        HTTP 409 Conflict is returned.
+
+      schema:
+        type: string
+        format: uuid
+
+      example: 9fe2d76a-268f-470b-a47f-a3895ab3a189
+
+
+  headers:
+
+    CorrelationIdResponseHeader:
+      description: |
+        Correlation identifier associated with the current HTTP request.
+
+        For an idempotent retry, this value may differ from the correlation
+        identifier associated with the original order creation.
+
+      schema:
+        type: string
+        format: uuid
+
+      example: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+
 
   schemas:
 
@@ -269,28 +457,38 @@ components:
           type: string
           minLength: 1
           maxLength: 100
+
           description: |
-            Order identifier generated by the source e-commerce platform.
+            Unique order identifier generated by the source
+            e-commerce platform.
+
           example: WEB-2026-000123
+
 
         customer:
           $ref: '#/components/schemas/Customer'
 
+
         items:
           type: array
           minItems: 1
+
           description: Products included in the order.
 
           items:
             $ref: '#/components/schemas/OrderItem'
+
 
         currency:
           type: string
           minLength: 3
           maxLength: 3
           pattern: '^[A-Z]{3}$'
+
           description: ISO 4217 currency code.
+
           example: EUR
+
 
         shippingAddress:
           $ref: '#/components/schemas/ShippingAddress'
@@ -311,12 +509,20 @@ components:
           type: string
           minLength: 1
           maxLength: 100
+
+          description: Identifier of the customer.
+
           example: CUST-10045
+
 
         email:
           type: string
           format: email
+          minLength: 1
           maxLength: 254
+
+          description: Customer email address.
+
           example: customer@example.com
 
 
@@ -336,17 +542,28 @@ components:
           type: string
           minLength: 1
           maxLength: 100
+
+          description: Identifier of the product.
+
           example: PROD-001
+
 
         quantity:
           type: integer
           minimum: 1
+
+          description: Number of product units.
+
           example: 2
+
 
         unitPrice:
           type: number
           format: double
           minimum: 0.01
+
+          description: Price per product unit.
+
           example: 29.95
 
 
@@ -367,31 +584,41 @@ components:
           type: string
           minLength: 1
           maxLength: 200
+
           example: 123 Example Street
+
 
         addressLine2:
           type: string
           maxLength: 200
+
           example: Apartment 4B
+
 
         city:
           type: string
           minLength: 1
           maxLength: 100
+
           example: Seville
+
 
         postalCode:
           type: string
           minLength: 1
           maxLength: 20
+
           example: "41001"
+
 
         country:
           type: string
           minLength: 2
           maxLength: 2
           pattern: '^[A-Z]{2}$'
+
           description: ISO 3166-1 alpha-2 country code.
+
           example: ES
 
 
@@ -412,25 +639,55 @@ components:
         orderId:
           type: string
           format: uuid
-          description: Internal identifier generated for the order.
-          example: 33c58292-f36e-4ca3-a421-c22da73e93e5
+
+          description: |
+            Internal identifier assigned to the order.
+
+            A legitimate idempotent retry returns the same orderId
+            generated by the original request.
+
+          example: b243423f-8047-49ea-b79f-50027400c022
+
 
         externalOrderId:
           type: string
+          minLength: 1
+          maxLength: 100
+
+          description: |
+            Order identifier assigned by the source e-commerce platform.
+
           example: WEB-2026-000123
+
 
         status:
           $ref: '#/components/schemas/OrderStatus'
 
+
         correlationId:
           type: string
           format: uuid
-          example: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+
+          description: |
+            Correlation identifier associated with the current HTTP request.
+
+            For a retry this identifier may differ from the identifier
+            associated with the original order creation.
+
+          example: 11111111-1111-4111-8111-111111111111
+
 
         acceptedAt:
           type: string
           format: date-time
-          example: "2026-09-04T20:32:15Z"
+
+          description: |
+            Timestamp when the order was originally accepted.
+
+            A legitimate idempotent retry returns the original acceptance
+            timestamp rather than generating a new value.
+
+          example: "2026-09-05T13:40:24.946179Z"
 
 
     OrderStatus:
@@ -450,6 +707,8 @@ components:
     ProblemDetails:
       type: object
 
+      additionalProperties: false
+
       required:
         - type
         - title
@@ -465,43 +724,71 @@ components:
         type:
           type: string
           format: uri
-          description: URI identifying the type of error.
+
+          description: URI identifying the category of the error.
+
           example: https://example.com/problems/order-validation
+
 
         title:
           type: string
+
           description: Short human-readable description of the error.
+
           example: Order validation failed
+
 
         status:
           type: integer
           format: int32
+          minimum: 400
+          maximum: 599
+
           description: HTTP status code.
+
           example: 400
+
 
         detail:
           type: string
+
           description: Human-readable explanation of the error.
+
           example: One or more fields are invalid.
+
 
         instance:
           type: string
+
           description: API resource where the error occurred.
+
           example: /api/v1/orders
+
 
         errorCode:
           type: string
-          description: Internal functional or technical error code.
+
+          description: |
+            Stable application error code that can be used by consumers
+            and operational tooling.
+
           example: ORD-VALIDATION-001
+
 
         correlationId:
           type: string
           format: uuid
-          description: Identifier used to trace the failed operation.
+
+          description: |
+            Identifier used to trace the failed request.
+
           example: b37166f4-8a39-4ffd-9599-c42ca48b83d0
+
 
         timestamp:
           type: string
           format: date-time
-          description: Time when the error occurred.
-          example: "2026-09-04T20:32:15Z"
+
+          description: Time when the error response was generated.
+
+          example: "2026-09-05T09:14:53.518186Z"
