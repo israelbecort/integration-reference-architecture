@@ -1,0 +1,39 @@
+name: Order API CI
+
+on:
+  push:
+    paths:
+      - 'order-api/**'
+      - '.github/workflows/order-api-ci.yml'
+
+  pull_request:
+    paths:
+      - 'order-api/**'
+      - '.github/workflows/order-api-ci.yml'
+
+jobs:
+  test:
+    name: Build and Test Order API
+
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: order-api
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Make Maven Wrapper executable
+        run: chmod +x mvnw
+
+      - name: Run tests
+        run: ./mvnw clean test
