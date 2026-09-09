@@ -1,0 +1,38 @@
+name: Integration Service CI
+
+on:
+  push:
+    paths:
+      - 'integration-service/**'
+      - '.github/workflows/integration-service-ci.yml'
+
+  pull_request:
+    paths:
+      - 'integration-service/**'
+      - '.github/workflows/integration-service-ci.yml'
+
+jobs:
+  test:
+    name: Build and Test Integration Service
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: integration-service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Make Maven Wrapper executable
+        run: chmod +x mvnw
+
+      - name: Run tests
+        run: ./mvnw clean test
