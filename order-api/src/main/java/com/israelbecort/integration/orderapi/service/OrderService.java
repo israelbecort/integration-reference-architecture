@@ -1,33 +1,37 @@
 package com.israelbecort.integration.orderapi.service;
 
+import com.israelbecort.integration.orderapi.client.integration.IntegrationServiceClient;
+import com.israelbecort.integration.orderapi.client.integration.dto.ProcessOrderAcceptedResponse;
+import com.israelbecort.integration.orderapi.client.integration.dto.ProcessOrderRequest;
+import com.israelbecort.integration.orderapi.client.integration.mapper.IntegrationOrderMapper;
 import com.israelbecort.integration.orderapi.domain.OrderStatus;
 import com.israelbecort.integration.orderapi.dto.request.OrderRequest;
 import com.israelbecort.integration.orderapi.dto.response.OrderAcceptedResponse;
-import com.israelbecort.integration.orderapi.exception.OrderConflictException;
 import com.israelbecort.integration.orderapi.persistence.entity.OrderEntity;
-import com.israelbecort.integration.orderapi.persistence.repository.OrderRepository;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
-import java.util.Optional;
 import java.util.UUID;
 
 @Service
 public class OrderService {
 
-    private final OrderRepository orderRepository;
     private final OrderRequestHashCalculator requestHashCalculator;
+    private final OrderPersistenceService orderPersistenceService;
+    private final IntegrationOrderMapper integrationOrderMapper;
+    private final IntegrationServiceClient integrationServiceClient;
 
     public OrderService(
-            OrderRepository orderRepository,
-            OrderRequestHashCalculator requestHashCalculator
+            OrderRequestHashCalculator requestHashCalculator,
+            OrderPersistenceService orderPersistenceService,
+            IntegrationOrderMapper integrationOrderMapper,
+            IntegrationServiceClient integrationServiceClient
     ) {
-        this.orderRepository = orderRepository;
         this.requestHashCalculator = requestHashCalculator;
+        this.orderPersistenceService = orderPersistenceService;
+        this.integrationOrderMapper = integrationOrderMapper;
+        this.integrationServiceClient = integrationServiceClient;
     }
 
-    @Transactional
     public OrderAcceptedResponse acceptOrder(
             OrderRequest request,
             UUID idempotencyKey,
@@ -37,53 +41,71 @@ public class OrderService {
         String requestHash =
                 requestHashCalculator.calculate(request);
 
-        Optional<OrderEntity> existingOrder =
-                orderRepository.findByIdempotencyKey(idempotencyKey);
-
-        if (existingOrder.isPresent()) {
-
-            OrderEntity order = existingOrder.get();
-
-            if (!order.getRequestHash().equals(requestHash)) {
-
-                throw new OrderConflictException(
-                        "The Idempotency-Key has already been used with a different request."
-                );
-            }
-
-            return toResponse(
-                    order,
-                    correlationId
-            );
-        }
-
-        if (orderRepository.existsByExternalOrderId(
-                request.externalOrderId()
-        )) {
-
-            throw new OrderConflictException(
-                    "An order with the same externalOrderId already exists."
-            );
-        }
-
         OrderEntity order =
-                new OrderEntity(
-                        UUID.randomUUID(),
-                        request.externalOrderId(),
+                orderPersistenceService.findOrCreateAcceptedOrder(
+                        request,
                         idempotencyKey,
-                        requestHash,
-                        OrderStatus.ACCEPTED,
                         correlationId,
-                        Instant.now()
+                        requestHash
                 );
 
-        OrderEntity savedOrder =
-                orderRepository.saveAndFlush(order);
+        if (order.getStatus() == OrderStatus.ACCEPTED) {
+
+            ProcessOrderRequest processOrderRequest =
+                    integrationOrderMapper.toProcessOrderRequest(
+                            request,
+                            order.getAcceptedAt()
+                    );
+
+            ProcessOrderAcceptedResponse integrationResponse =
+                    integrationServiceClient.processOrder(
+                            order.getOrderId(),
+                            correlationId,
+                            processOrderRequest
+                    );
+
+            validateIntegrationResponse(
+                    order,
+                    correlationId,
+                    integrationResponse
+            );
+
+            order =
+                    orderPersistenceService.markAsProcessing(
+                            order.getOrderId()
+                    );
+        }
 
         return toResponse(
-                savedOrder,
+                order,
                 correlationId
         );
+    }
+
+    private void validateIntegrationResponse(
+            OrderEntity order,
+            UUID correlationId,
+            ProcessOrderAcceptedResponse response
+    ) {
+
+        if (!order.getOrderId().equals(response.orderId())) {
+            throw new IllegalStateException(
+                    "Integration Service returned a different orderId."
+            );
+        }
+
+        if (!correlationId.equals(response.correlationId())) {
+            throw new IllegalStateException(
+                    "Integration Service returned a different correlationId."
+            );
+        }
+
+        if (!OrderStatus.PROCESSING.name().equals(response.status())) {
+            throw new IllegalStateException(
+                    "Integration Service returned unexpected order status: "
+                            + response.status()
+            );
+        }
     }
 
     private OrderAcceptedResponse toResponse(

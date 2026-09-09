@@ -156,6 +156,32 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(IntegrationServiceUnavailableException.class)
+    public ResponseEntity<ProblemDetailsResponse>
+    handleIntegrationServiceUnavailable(
+            IntegrationServiceUnavailableException exception,
+            HttpServletRequest request
+    ) {
+
+        UUID correlationId = resolveCorrelationId(request);
+
+        ProblemDetailsResponse problem = buildProblem(
+                "https://example.com/problems/dependency-unavailable",
+                "Downstream service unavailable",
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "The Integration Service is temporarily unavailable.",
+                request.getRequestURI(),
+                "ORD-DEPENDENCY-001",
+                correlationId
+        );
+
+        return buildResponse(
+                problem,
+                HttpStatus.SERVICE_UNAVAILABLE,
+                correlationId
+        );
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetailsResponse> handleUnexpectedException(
             Exception exception,

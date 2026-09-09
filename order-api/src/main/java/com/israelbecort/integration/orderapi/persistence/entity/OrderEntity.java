@@ -122,7 +122,7 @@ public class OrderEntity {
         return acceptedAt;
     }
 
-    public void setStatus(OrderStatus status) {
-        this.status = status;
+    public void markAsProcessing() {
+        this.status = OrderStatus.PROCESSING;
     }
 }
