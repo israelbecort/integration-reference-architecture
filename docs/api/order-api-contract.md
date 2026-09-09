@@ -10,12 +10,33 @@ The API follows a contract-first approach and is responsible for:
 
 - Request validation
 - Correlation identifier handling
-- Idempotent order creation
-- Initial order acceptance
+- Persistent idempotent order creation
+- Initial order persistence
+- Synchronous handoff to the Integration Service
 - Consistent HTTP responses
 - Consistent error responses
 
-Downstream ERP processing will be performed asynchronously by other components of the integration architecture.
+The Order API persists a new order before invoking the Integration Service.
+
+A successfully processed request therefore follows this high-level flow:
+
+```text
+E-Commerce
+    ↓
+Order API
+    ↓
+Persist ACCEPTED
+    ↓
+Integration Service
+    ↓
+Processing accepted
+    ↓
+Persist PROCESSING
+    ↓
+202 Accepted
+```
+
+Downstream ERP processing will later continue asynchronously through Kafka.
 
 For this reason, successful order creation requests return:
 
@@ -25,25 +46,27 @@ rather than:
 
 `201 Created`
 
-The response confirms that the order has been accepted by the platform, not that all downstream business processing has completed.
+The response confirms that the platform has accepted the order for continued processing.
+
+It does not mean that all downstream business processing has completed.
 
 ---
 
-## Create Order
+# Create Order
 
-### Endpoint
+## Endpoint
 
 `POST /api/v1/orders`
 
-### Content Type
+## Content Type
 
 `application/json`
 
 ---
 
-## Request Headers
+# Request Headers
 
-### `X-Correlation-Id`
+## `X-Correlation-Id`
 
 Optional.
 
@@ -61,7 +84,9 @@ If the caller provides the header, the Order API propagates the same correlation
 
 If the caller does not provide the header, the Order API generates a new correlation identifier.
 
-The effective correlation identifier is returned both:
+The effective correlation identifier is propagated to the Integration Service.
+
+For successful requests, the effective correlation identifier is returned both:
 
 - In the response header
 - In the response body
@@ -74,7 +99,7 @@ X-Correlation-Id: b37166f4-8a39-4ffd-9599-c42ca48b83d0
 
 ---
 
-### `Idempotency-Key`
+## `Idempotency-Key`
 
 Required.
 
@@ -92,9 +117,15 @@ The same idempotency key must be reused when retrying the same order creation op
 
 The idempotency key must not be reused for a different request.
 
+The `Idempotency-Key` belongs to the public Order API contract.
+
+It is not propagated to the Integration Service.
+
+After an order is created, the internal `orderId` becomes the stable identity used by the integration layer.
+
 ---
 
-## Request Body
+# Request Body
 
 Example:
 
@@ -129,9 +160,9 @@ Example:
 
 ---
 
-## Request Fields
+# Request Fields
 
-### `externalOrderId`
+## `externalOrderId`
 
 Required.
 
@@ -151,7 +182,7 @@ WEB-2026-000123
 
 ---
 
-### `customer`
+## `customer`
 
 Required.
 
@@ -159,7 +190,7 @@ Contains the customer information required during order creation.
 
 ---
 
-### `customer.customerId`
+## `customer.customerId`
 
 Required.
 
@@ -178,7 +209,7 @@ CUST-10045
 
 ---
 
-### `customer.email`
+## `customer.email`
 
 Required.
 
@@ -198,7 +229,7 @@ customer@example.com
 
 ---
 
-### `items`
+## `items`
 
 Required.
 
@@ -210,7 +241,7 @@ Requirements:
 
 ---
 
-### `items[].productId`
+## `items[].productId`
 
 Required.
 
@@ -229,7 +260,7 @@ PROD-001
 
 ---
 
-### `items[].quantity`
+## `items[].quantity`
 
 Required.
 
@@ -248,7 +279,7 @@ Example:
 
 ---
 
-### `items[].unitPrice`
+## `items[].unitPrice`
 
 Required.
 
@@ -266,7 +297,7 @@ Example:
 
 ---
 
-### `currency`
+## `currency`
 
 Required.
 
@@ -286,7 +317,7 @@ GBP
 
 ---
 
-### `shippingAddress`
+## `shippingAddress`
 
 Required.
 
@@ -294,7 +325,7 @@ Contains the shipping destination associated with the order.
 
 ---
 
-### `shippingAddress.addressLine1`
+## `shippingAddress.addressLine1`
 
 Required.
 
@@ -311,7 +342,7 @@ Example:
 
 ---
 
-### `shippingAddress.addressLine2`
+## `shippingAddress.addressLine2`
 
 Optional.
 
@@ -329,7 +360,7 @@ Apartment 4B
 
 ---
 
-### `shippingAddress.city`
+## `shippingAddress.city`
 
 Required.
 
@@ -346,7 +377,7 @@ Seville
 
 ---
 
-### `shippingAddress.postalCode`
+## `shippingAddress.postalCode`
 
 Required.
 
@@ -363,7 +394,7 @@ Example:
 
 ---
 
-### `shippingAddress.country`
+## `shippingAddress.country`
 
 Required.
 
@@ -387,7 +418,20 @@ DE
 
 ## New Order
 
-When the request is valid and the `Idempotency-Key` has not been used before, the platform creates and accepts a new order.
+When the request is valid and the `Idempotency-Key` has not been used before, the Order API:
+
+1. Creates the internal order.
+2. Persists it with status `ACCEPTED`.
+3. Commits the database transaction.
+4. Calls the Integration Service using the internal `orderId`.
+5. Propagates the effective `X-Correlation-Id`.
+6. Receives confirmation that integration processing has been accepted.
+7. Updates the persisted order to `PROCESSING`.
+8. Returns `202 Accepted`.
+
+The HTTP call to the Integration Service is deliberately executed outside the database transaction used to create the order.
+
+This prevents the Order API from keeping a database transaction open while waiting for a remote dependency.
 
 Response:
 
@@ -399,7 +443,7 @@ Example:
 {
   "orderId": "b243423f-8047-49ea-b79f-50027400c022",
   "externalOrderId": "WEB-2026-000123",
-  "status": "ACCEPTED",
+  "status": "PROCESSING",
   "correlationId": "11111111-1111-4111-8111-111111111111",
   "acceptedAt": "2026-09-05T13:40:24.946179Z"
 }
@@ -411,76 +455,63 @@ Response header:
 X-Correlation-Id: 11111111-1111-4111-8111-111111111111
 ```
 
+The `acceptedAt` value represents when the order was originally persisted and accepted by the Order API.
+
+It does not represent when the Integration Service accepted the processing request.
+
 ---
 
-## Idempotent Retry
+# Idempotent Retry
 
 A client may retry the same request using the same `Idempotency-Key`.
+
+The behavior depends on the current persisted order state.
+
+## Retry When the Order Is Already `PROCESSING`
 
 Example:
 
 ```text
 First request
 
-Idempotency-Key: ABC
-Request: A
+Idempotency-Key = ABC
+Request = A
 
         ↓
 
 ORDER-123
+status = PROCESSING
 ```
 
 If the client retries:
 
 ```text
-Idempotency-Key: ABC
-Request: A
+Idempotency-Key = ABC
+Request = A
 
         ↓
 
-Same ORDER-123
+Existing ORDER-123
+status = PROCESSING
 ```
 
-The platform must not create another order.
+The platform:
 
-The retry returns:
+- Does not create another order
+- Does not invoke the Integration Service again
+- Returns the existing order
+
+Response:
 
 `202 Accepted`
 
-with the same:
+The response preserves the original:
 
 - `orderId`
 - `externalOrderId`
-- `status`
 - `acceptedAt`
 
-The retry may use a different `X-Correlation-Id`.
-
-Example:
-
-```text
-First request
-
-Idempotency-Key = ABC
-Correlation-Id = 111
-
-        ↓
-
-ORDER-123
-```
-
-Retry:
-
-```text
-Idempotency-Key = ABC
-Correlation-Id = 222
-
-        ↓
-
-Same ORDER-123
-```
-
-The retry response contains the correlation identifier associated with the current request.
+The response uses the correlation identifier associated with the current HTTP request.
 
 Example:
 
@@ -488,11 +519,62 @@ Example:
 {
   "orderId": "b243423f-8047-49ea-b79f-50027400c022",
   "externalOrderId": "WEB-2026-000123",
-  "status": "ACCEPTED",
+  "status": "PROCESSING",
   "correlationId": "22222222-2222-4222-8222-222222222222",
   "acceptedAt": "2026-09-05T13:40:24.946179Z"
 }
 ```
+
+---
+
+## Retry When the Order Is Still `ACCEPTED`
+
+An order may remain in `ACCEPTED` when:
+
+1. The order was successfully persisted.
+2. The transaction was committed.
+3. The synchronous handoff to the Integration Service failed before the order could transition to `PROCESSING`.
+
+Example:
+
+```text
+Order API
+    ↓
+Persist ORDER-123
+status = ACCEPTED
+    ↓
+COMMIT
+    ↓
+Integration Service unavailable
+    ↓
+Processing handoff fails
+```
+
+The persisted order is not deleted or rolled back.
+
+If the client later retries using:
+
+```text
+Same Idempotency-Key
++
+Same request
+```
+
+the Order API finds the existing `ACCEPTED` order and may retry the synchronous handoff to the Integration Service.
+
+If the retry succeeds:
+
+```text
+ACCEPTED
+    ↓
+Integration Service accepts processing
+    ↓
+PROCESSING
+```
+
+The same internal `orderId` and original `acceptedAt` are preserved.
+
+This recovery behavior is one of the reasons idempotency is persisted rather than held only in application memory.
 
 ---
 
@@ -523,7 +605,15 @@ Request = A
 
         ↓
 
-New order created
+New order created as ACCEPTED
+
+        ↓
+
+Integration Service accepts processing
+
+        ↓
+
+Order becomes PROCESSING
 
         ↓
 
@@ -532,7 +622,7 @@ New order created
 
 ---
 
-## Scenario 2 — Same Key and Same Request
+## Scenario 2 — Same Key and Same Request, Already Processing
 
 ```text
 Idempotency-Key = ABC
@@ -548,6 +638,14 @@ Request fingerprint matches
 
         ↓
 
+Existing order status = PROCESSING
+
+        ↓
+
+Do not invoke Integration Service again
+
+        ↓
+
 Return existing order
 
         ↓
@@ -557,13 +655,52 @@ Return existing order
 
 No duplicate order is created.
 
+No duplicate downstream processing request is initiated by the Order API.
+
 ---
 
-## Scenario 3 — Same Key and Different Request
+## Scenario 3 — Same Key and Same Request, Still Accepted
 
 ```text
+Idempotency-Key = ABC
+Request = A
+
+        ↓
+
+Existing operation found
+
+        ↓
+
+Request fingerprint matches
+
+        ↓
+
+Existing order status = ACCEPTED
+
+        ↓
+
+Retry Integration Service handoff
+```
+
+If the handoff succeeds:
+
+```text
+ACCEPTED
+    ↓
+PROCESSING
+    ↓
+202 Accepted
+```
+
+The original order remains the same business operation.
+
+---
+
+## Scenario 4 — Same Key and Different Request
+
 Existing operation:
 
+```text
 Idempotency-Key = ABC
 Request = A
 ```
@@ -593,19 +730,17 @@ ORD-CONFLICT-001
 
 ---
 
-## Scenario 4 — Same External Order ID with Different Key
+## Scenario 5 — Same External Order ID with Different Key
 
-Example:
-
-```text
 First request:
 
+```text
 externalOrderId = WEB-2026-000123
 Idempotency-Key = ABC
 
         ↓
 
-202 Accepted
+Order created
 ```
 
 Later:
@@ -635,15 +770,31 @@ The order lifecycle currently defines the following states.
 
 ## `ACCEPTED`
 
-The order has been validated and accepted by the platform.
+The order has been validated and persisted by the Order API.
 
-Downstream processing may not yet have completed.
+The Integration Service has not yet successfully accepted the processing request.
+
+An order may temporarily remain in this state when the synchronous handoff to the Integration Service fails.
 
 ---
 
 ## `PROCESSING`
 
-The order is being processed by downstream systems.
+The Integration Service has accepted the order for integration processing.
+
+This does not mean that all downstream systems have completed their work.
+
+Future processing may still include:
+
+```text
+Integration Service
+        ↓
+CRM
+        ↓
+Kafka
+        ↓
+ERP
+```
 
 ---
 
@@ -651,11 +802,15 @@ The order is being processed by downstream systems.
 
 The order has been successfully processed.
 
+This state is part of the planned lifecycle and will become relevant when downstream completion handling is introduced.
+
 ---
 
 ## `FAILED`
 
 The order could not be processed successfully.
+
+This state is part of the planned lifecycle and will become relevant when failure handling and terminal processing outcomes are introduced.
 
 ---
 
@@ -684,7 +839,7 @@ Example:
 }
 ```
 
-The response also contains:
+When a valid correlation identifier is available, the response also contains:
 
 ```text
 X-Correlation-Id
@@ -692,20 +847,25 @@ X-Correlation-Id
 
 to support request tracing.
 
+If an incoming `X-Correlation-Id` cannot be parsed as a valid UUID, a valid correlation identifier may not be available for the error response.
+
 ---
 
 # HTTP Status Codes
 
 ## `202 Accepted`
 
-The request has been accepted for processing.
+The request has been accepted for continued processing.
 
 Used for:
 
-- New order creation
-- Legitimate retry using the same `Idempotency-Key` and equivalent request
+- New order creation after the Integration Service accepts the processing request
+- Legitimate retry for an order already in `PROCESSING`
+- Legitimate retry for an `ACCEPTED` order when the Integration Service handoff succeeds
 
-A legitimate idempotent retry returns the previously created order instead of creating another one.
+A legitimate idempotent retry never creates another internal order.
+
+If the persisted order is already `PROCESSING`, the Order API does not invoke the Integration Service again.
 
 ---
 
@@ -799,7 +959,33 @@ Business rule validation will evolve as downstream integrations are introduced.
 
 A required synchronous downstream dependency is temporarily unavailable.
 
-This status will become relevant when the Order API is connected to the Integration Service and required synchronous integrations.
+For the current architecture, the primary synchronous dependency of the Order API is the Integration Service.
+
+An important consistency characteristic is that the order may already have been persisted as:
+
+```text
+ACCEPTED
+```
+
+before this error occurs.
+
+The persisted order is therefore not necessarily rolled back when the downstream handoff fails.
+
+A legitimate retry using the same:
+
+```text
+Idempotency-Key
++
+request
+```
+
+can locate the existing `ACCEPTED` order and attempt the Integration Service handoff again.
+
+Intended error code:
+
+```text
+ORD-DEPENDENCY-001
+```
 
 ---
 
@@ -819,7 +1005,7 @@ ORD-INTERNAL-001
 
 # Correlation and Traceability
 
-Every request has an effective correlation identifier.
+Every successfully handled request has an effective correlation identifier.
 
 If the caller provides:
 
@@ -831,13 +1017,19 @@ the platform propagates it.
 
 If the caller does not provide one, the Order API generates a new UUID.
 
-The identifier will progressively be propagated across:
+The correlation identifier is propagated across the current synchronous boundary:
 
 ```text
 E-Commerce
     ↓
 Order API
     ↓
+Integration Service
+```
+
+It will progressively also be propagated across:
+
+```text
 Integration Service
     ↓
 CRM
@@ -865,7 +1057,7 @@ These identifiers serve different purposes.
 
 ## `Idempotency-Key`
 
-Identifies the business operation being retried.
+Identifies the public business operation being retried.
 
 Example:
 
@@ -879,6 +1071,34 @@ Retries of the same operation reuse:
 
 ```text
 ABC
+```
+
+The idempotency key is consumed by the Order API and is not propagated as the identity of the internal integration operation.
+
+---
+
+## `orderId`
+
+Identifies the persisted internal order.
+
+After creation, the Integration Service receives:
+
+```text
+orderId
+```
+
+as the stable internal order identity.
+
+Example:
+
+```text
+Idempotency-Key = ABC
+        ↓
+Order API
+        ↓
+orderId = ORDER-123
+        ↓
+Integration Service
 ```
 
 ---
@@ -903,7 +1123,11 @@ Both attempts may belong to:
 Idempotency-Key = ABC
 ```
 
-and therefore resolve to the same order.
+and therefore resolve to the same:
+
+```text
+orderId = ORDER-123
+```
 
 ---
 
@@ -920,14 +1144,64 @@ The Order API currently performs:
 3. Request validation
 4. Correlation ID handling
 5. Idempotency verification
-6. Initial order persistence
-7. Order acceptance
+6. Initial order persistence as `ACCEPTED`
+7. Transaction commit
+8. Internal request transformation
+9. Synchronous HTTP call to the Integration Service
+10. Correlation ID propagation
+11. Integration response validation
+12. Order transition from `ACCEPTED` to `PROCESSING`
+13. Final `202 Accepted` response
+
+The database transaction used to create the order is completed before the remote Integration Service call begins.
+
+The transition to `PROCESSING` is persisted in a separate transaction after the Integration Service successfully accepts the processing request.
+
+---
+
+## Current Integration Boundary
+
+```text
+Order API
+    ↓
+POST /internal/v1/orders/{orderId}/process
+    ↓
+Integration Service
+```
+
+The Order API sends:
+
+- `orderId` as the internal operation identity
+- `X-Correlation-Id` for request traceability
+- Order business data
+- Original `acceptedAt` timestamp
+
+The Order API does not propagate:
+
+```text
+Idempotency-Key
+```
+
+to the Integration Service.
 
 ---
 
 ## Future Synchronous Responsibilities
 
-When the Integration Service is introduced, required synchronous enterprise interactions may occur before the order is accepted for downstream processing.
+The Integration Service will progressively introduce required synchronous enterprise interactions such as:
+
+```text
+Integration Service
+        ↓
+CRM
+```
+
+These interactions will introduce additional resilience concerns including:
+
+- Timeouts
+- Retry policies
+- Circuit breaking
+- Dependency error classification
 
 ---
 
@@ -950,6 +1224,48 @@ This is why the API returns:
 `202 Accepted`
 
 rather than indicating that all downstream processing has completed.
+
+---
+
+# Transaction Boundaries
+
+The Order API deliberately separates database transactions from remote HTTP communication.
+
+The flow is:
+
+```text
+Transaction 1
+    ↓
+Create or retrieve order
+    ↓
+Persist ACCEPTED
+    ↓
+COMMIT
+
+No database transaction
+    ↓
+HTTP call to Integration Service
+
+Transaction 2
+    ↓
+Persist PROCESSING
+    ↓
+COMMIT
+```
+
+The architecture avoids:
+
+```text
+BEGIN DATABASE TRANSACTION
+        ↓
+HTTP call to remote service
+        ↓
+wait for network/dependency
+        ↓
+COMMIT
+```
+
+This reduces transaction duration and prevents database resources from being held while waiting for a remote dependency.
 
 ---
 
@@ -983,6 +1299,24 @@ external_order_id
 
 These constraints provide a final consistency boundary against duplicate order creation.
 
+The persisted order status also participates in retry behavior.
+
+For example:
+
+```text
+PROCESSING
+    ↓
+do not invoke Integration Service again
+```
+
+while:
+
+```text
+ACCEPTED
+    ↓
+Integration Service handoff may be retried
+```
+
 ---
 
 # Design Principles
@@ -992,12 +1326,17 @@ The Order API follows these principles:
 - Contract-first API design
 - Idempotent order creation
 - Persistent duplicate protection
+- Explicit transaction boundaries
+- No remote HTTP call inside the order creation database transaction
 - Request traceability
+- Correlation propagation
 - Consistent error responses
 - Explicit HTTP semantics
-- Separation between API and persistence models
+- Separation between public API contracts and internal integration contracts
 - Separation between API exposure and integration orchestration
+- Separation between persistence and remote communication
 - Database-enforced consistency
+- Defensive validation of downstream responses
 - Resilience by design
 - Observability by design
 - No exposure of internal implementation details
@@ -1052,6 +1391,14 @@ Architecture overview:
 OpenAPI specification:
 
 `docs/api/order-api.yaml`
+
+Integration Service contract:
+
+`docs/api/integration-service-contract.md`
+
+Integration Service OpenAPI specification:
+
+`docs/api/integration-service.yaml`
 
 Event documentation:
 
