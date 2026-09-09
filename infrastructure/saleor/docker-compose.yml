@@ -1,0 +1,99 @@
+services:
+
+  api:
+    image: ghcr.io/saleor/saleor:3.23
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+    stdin_open: true
+    tty: true
+    depends_on:
+      - db
+      - cache
+      - jaeger
+    volumes:
+      - saleor-media:/app/media
+    env_file:
+      - ../../external/saleor-platform/common.env
+      - ../../external/saleor-platform/backend.env
+    environment:
+      - DASHBOARD_URL=http://localhost:9000/
+      - ALLOWED_HOSTS=localhost,127.0.0.1,api
+
+  dashboard:
+    image: ghcr.io/saleor/saleor-dashboard:3.23
+    ports:
+      - "9000:80"
+    restart: unless-stopped
+
+  db:
+    image: library/postgres:15-alpine
+    ports:
+      - "5435:5432"
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+    volumes:
+      - saleor-db:/var/lib/postgresql/data
+      - ../../external/saleor-platform/replica_user.sql:/docker-entrypoint-initdb.d/replica_user.sql:ro,z
+    environment:
+      - POSTGRES_USER=saleor
+      - POSTGRES_PASSWORD=saleor
+
+  cache:
+    image: valkey/valkey:8.1-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+    volumes:
+      - saleor-cache:/data
+
+  worker:
+    image: ghcr.io/saleor/saleor:3.23
+    command: celery -A saleor --app=saleor.celeryconf:app worker --loglevel=info -B
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+    env_file:
+      - ../../external/saleor-platform/common.env
+      - ../../external/saleor-platform/backend.env
+    depends_on:
+      - cache
+      - mailpit
+    volumes:
+      - saleor-media:/app/media
+
+  jaeger:
+    image: jaegertracing/jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+    volumes:
+      - type: tmpfs
+        target: /tmp
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+
+volumes:
+  saleor-db:
+  saleor-cache:
+  saleor-media:
+
+networks:
+  saleor-backend-tier:
+    driver: bridge
