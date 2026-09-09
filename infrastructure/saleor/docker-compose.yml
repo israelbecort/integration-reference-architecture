@@ -1,5 +1,4 @@
 services:
-
   api:
     image: ghcr.io/saleor/saleor:3.23
     ports:
@@ -21,6 +20,7 @@ services:
     environment:
       - DASHBOARD_URL=http://localhost:9000/
       - ALLOWED_HOSTS=localhost,127.0.0.1,api
+      - HTTP_IP_FILTER_ENABLED=False
 
   dashboard:
     image: ghcr.io/saleor/saleor-dashboard:3.23
@@ -61,6 +61,8 @@ services:
     env_file:
       - ../../external/saleor-platform/common.env
       - ../../external/saleor-platform/backend.env
+    environment:
+      - HTTP_IP_FILTER_ENABLED=False
     depends_on:
       - cache
       - mailpit
@@ -89,10 +91,27 @@ services:
     networks:
       - saleor-backend-tier
 
+  dynamodb:
+    image: amazon/dynamodb-local:3.3.1
+    user: "0:0"
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath ./data -disableTelemetry"
+    ports:
+      - "8001:8000"
+    working_dir: /home/dynamodblocal
+    volumes:
+      - saleor-dynamodb:/home/dynamodblocal/data
+    restart: unless-stopped
+    networks:
+      - saleor-backend-tier
+
 volumes:
   saleor-db:
+    driver: local
   saleor-cache:
+    driver: local
   saleor-media:
+  saleor-dynamodb:
+    driver: local
 
 networks:
   saleor-backend-tier:
