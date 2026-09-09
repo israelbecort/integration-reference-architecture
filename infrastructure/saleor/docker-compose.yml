@@ -17,6 +17,7 @@ services:
     env_file:
       - ../../external/saleor-platform/common.env
       - ../../external/saleor-platform/backend.env
+      - ./saleor.local.env
     environment:
       - DASHBOARD_URL=http://localhost:9000/
       - ALLOWED_HOSTS=localhost,127.0.0.1,api
@@ -61,6 +62,7 @@ services:
     env_file:
       - ../../external/saleor-platform/common.env
       - ../../external/saleor-platform/backend.env
+      - ./saleor.local.env
     environment:
       - HTTP_IP_FILTER_ENABLED=False
     depends_on:
