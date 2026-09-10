@@ -27,6 +27,11 @@ const orderLineSchema = z.object({
   productName: z.string().min(1),
   variantName: z.string(),
   productSku: z.string().min(1).nullable(),
+  variant: z
+    .object({
+      id: z.string().min(1),
+    })
+    .nullable(),
 
   unitPrice: z.object({
     gross: moneySchema,
@@ -57,6 +62,11 @@ export const saleorOrderCreatedSchema = z.object({
     status: z.string().min(1),
 
     userEmail: z.string().email(),
+    user: z
+      .object({
+        id: z.string().min(1),
+      })
+      .nullable(),
 
     total: z.object({
       gross: moneySchema,

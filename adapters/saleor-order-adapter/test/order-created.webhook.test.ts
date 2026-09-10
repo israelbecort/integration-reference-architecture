@@ -20,6 +20,9 @@ const validOrderCreatedPayload = {
     created: "2026-09-09T14:05:02.478473+00:00",
     status: "UNFULFILLED",
     userEmail: "integration.test@example.com",
+    user: {
+      id: "VXNlcjp0ZXN0LXVzZXI=",
+    },
 
     total: {
       gross: {
@@ -67,6 +70,9 @@ const validOrderCreatedPayload = {
         productName: "Blue Hoodie",
         variantName: "UHJvZHVjdFZhcmlhbnQ6MzQ2",
         productSku: null,
+        variant: {
+          id: "UHJvZHVjdFZhcmlhbnQ6MzQ2",
+        },
         unitPrice: {
           gross: {
             amount: 35,
@@ -92,7 +98,7 @@ describe("POST /webhooks/saleor/order-created", () => {
       verifySaleorSignature:
         vi.fn().mockResolvedValue(undefined),
     });
-  
+
     await app.ready();
   });
 
@@ -169,9 +175,9 @@ describe("POST /webhooks/saleor/order-created", () => {
       },
       payload: validOrderCreatedPayload,
     });
-  
+
     expect(response.statusCode).toBe(401);
-  
+
     expect(JSON.parse(response.body)).toEqual({
       code: "SALEOR_SIGNATURE_MISSING",
       message:
@@ -187,9 +193,9 @@ describe("POST /webhooks/saleor/order-created", () => {
             new Error("Invalid signature"),
           ),
       });
-  
+
     await appWithInvalidSignature.ready();
-  
+
     try {
       const response =
         await appWithInvalidSignature.inject({
@@ -204,9 +210,9 @@ describe("POST /webhooks/saleor/order-created", () => {
           },
           payload: validOrderCreatedPayload,
         });
-  
+
       expect(response.statusCode).toBe(401);
-  
+
       expect(
         JSON.parse(response.body),
       ).toEqual({
@@ -217,5 +223,28 @@ describe("POST /webhooks/saleor/order-created", () => {
     } finally {
       await appWithInvalidSignature.close();
     }
+  });
+  it("accepts a guest Saleor order without a registered user", async () => {
+    const guestPayload = {
+      ...validOrderCreatedPayload,
+      order: {
+        ...validOrderCreatedPayload.order,
+        user: null,
+      },
+    };
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/saleor/order-created",
+      headers: {
+        "content-type": "application/json",
+        "saleor-event": "order_created",
+        "saleor-domain": "localhost:8000",
+        "saleor-signature": "test-signature",
+      },
+      payload: guestPayload,
+    });
+
+    expect(response.statusCode).toBe(202);
   });
 });
