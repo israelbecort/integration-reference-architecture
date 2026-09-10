@@ -1,0 +1,31 @@
+{
+  "name": "saleor-order-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Saleor ORDER_CREATED webhook adapter for the canonical Order API.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "packageManager": "pnpm@10.28.1",
+  "dependencies": {
+    "fastify": "^5.12.3",
+    "fastify-raw-body": "^6.0.0",
+    "jose": "^6.2.12",
+    "uuid": "^14.0.2",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}
