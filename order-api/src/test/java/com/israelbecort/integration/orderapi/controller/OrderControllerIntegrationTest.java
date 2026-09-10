@@ -728,6 +728,92 @@ class OrderControllerIntegrationTest {
                 any(ProcessOrderRequest.class)
         );
     }
+    @Test
+    void createOrder_shouldAcceptGuestCustomerWithoutCustomerId()
+            throws Exception {
+
+        String request = """
+            {
+              "externalOrderId": "WEB-GUEST-000001",
+              "customer": {
+                "email": "guest@example.com"
+              },
+              "items": [
+                {
+                  "productId": "PROD-001",
+                  "quantity": 1,
+                  "unitPrice": 29.95
+                }
+              ],
+              "currency": "EUR",
+              "shippingAddress": {
+                "addressLine1": "123 Example Street",
+                "city": "Seville",
+                "postalCode": "41001",
+                "country": "ES"
+              }
+            }
+            """;
+
+        mockMvc.perform(
+                        post(ORDERS_URL)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .header(
+                                        "X-Correlation-Id",
+                                        CORRELATION_ID
+                                )
+                                .header(
+                                        "Idempotency-Key",
+                                        UUID.randomUUID().toString()
+                                )
+                                .content(request)
+                )
+                .andExpect(status().isAccepted());
+    }
+
+    @Test
+    void createOrder_shouldReturn400WhenCustomerIdIsBlank()
+            throws Exception {
+
+        String request = """
+            {
+              "externalOrderId": "WEB-GUEST-000002",
+              "customer": {
+                "customerId": "   ",
+                "email": "guest@example.com"
+              },
+              "items": [
+                {
+                  "productId": "PROD-001",
+                  "quantity": 1,
+                  "unitPrice": 29.95
+                }
+              ],
+              "currency": "EUR",
+              "shippingAddress": {
+                "addressLine1": "123 Example Street",
+                "city": "Seville",
+                "postalCode": "41001",
+                "country": "ES"
+              }
+            }
+            """;
+
+        mockMvc.perform(
+                        post(ORDERS_URL)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .header(
+                                        "X-Correlation-Id",
+                                        CORRELATION_ID
+                                )
+                                .header(
+                                        "Idempotency-Key",
+                                        UUID.randomUUID().toString()
+                                )
+                                .content(request)
+                )
+                .andExpect(status().isBadRequest());
+    }
 
     private String validOrderRequest() {
 

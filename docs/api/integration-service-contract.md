@@ -195,11 +195,18 @@ Customer information required by downstream integrations.
 
 ## `customer.customerId`
 
-Required.
+Optional.
+
+Identifier of the customer in the source system.
+
+For registered customers, this value is propagated from the Order API.
+
+For guest orders, this field may be null or omitted when no registered
+customer identity is available.
 
 Requirements:
 
-- Must not be empty
+- When provided, must not be empty or blank
 - Maximum length: 100 characters
 
 Example:

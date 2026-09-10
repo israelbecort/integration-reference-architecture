@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Integration Service API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Internal REST API used by the Order API to initiate enterprise
     integration processing for an accepted order.
@@ -449,20 +449,23 @@ components:
       additionalProperties: false
 
       required:
-        - customerId
         - email
 
       properties:
 
         customerId:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 100
+          pattern: '.*\S.*'
 
-          description: Customer identifier.
+          description: |
+            Identifier of the customer in the source system.
+            Null or omitted for guest orders where no registered
+            customer identity is available.
 
           example: CUST-10045
-
 
         email:
           type: string

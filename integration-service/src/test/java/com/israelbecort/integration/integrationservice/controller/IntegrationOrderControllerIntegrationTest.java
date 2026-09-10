@@ -288,6 +288,93 @@ class IntegrationOrderControllerIntegrationTest {
                 );
     }
 
+    @Test
+    void shouldAcceptGuestCustomerWithoutCustomerId()
+            throws Exception {
+
+        String request = """
+            {
+              "externalOrderId": "WEB-GUEST-000001",
+              "customer": {
+                "email": "guest@example.com"
+              },
+              "items": [
+                {
+                  "productId": "PROD-001",
+                  "quantity": 1,
+                  "unitPrice": 29.95
+                }
+              ],
+              "currency": "EUR",
+              "shippingAddress": {
+                "addressLine1": "123 Example Street",
+                "city": "Seville",
+                "postalCode": "41001",
+                "country": "ES"
+              },
+              "acceptedAt": "2026-09-10T10:00:00Z"
+            }
+            """;
+
+        mockMvc.perform(
+                        post(
+                                "/internal/v1/orders/{orderId}/process",
+                                ORDER_ID
+                        )
+                                .header(
+                                        "X-Correlation-Id",
+                                        CORRELATION_ID
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(request)
+                )
+                .andExpect(status().isAccepted());
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenCustomerIdIsBlank()
+            throws Exception {
+
+        String request = """
+            {
+              "externalOrderId": "WEB-GUEST-000002",
+              "customer": {
+                "customerId": "   ",
+                "email": "guest@example.com"
+              },
+              "items": [
+                {
+                  "productId": "PROD-001",
+                  "quantity": 1,
+                  "unitPrice": 29.95
+                }
+              ],
+              "currency": "EUR",
+              "shippingAddress": {
+                "addressLine1": "123 Example Street",
+                "city": "Seville",
+                "postalCode": "41001",
+                "country": "ES"
+              },
+              "acceptedAt": "2026-09-10T10:00:00Z"
+            }
+            """;
+
+        mockMvc.perform(
+                        post(
+                                "/internal/v1/orders/{orderId}/process",
+                                ORDER_ID
+                        )
+                                .header(
+                                        "X-Correlation-Id",
+                                        CORRELATION_ID
+                                )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(request)
+                )
+                .andExpect(status().isBadRequest());
+    }
+
     private String validRequest() {
 
         return """

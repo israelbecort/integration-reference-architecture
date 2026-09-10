@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Order API
-  version: 1.2.0
+  version: 1.3.0
   description: |
     REST API used to receive orders from the fictional e-commerce platform.
 
@@ -541,20 +541,23 @@ components:
       additionalProperties: false
 
       required:
-        - customerId
         - email
 
       properties:
 
         customerId:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 100
+          pattern: '.*\S.*'
 
-          description: Identifier of the customer.
+          description: |
+            Identifier of the customer in the source system.
+            Null or omitted for guest orders where the source platform
+            has no registered customer identity.
 
           example: CUST-10045
-
 
         email:
           type: string

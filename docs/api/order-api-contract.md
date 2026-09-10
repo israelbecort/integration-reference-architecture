@@ -192,13 +192,19 @@ Contains the customer information required during order creation.
 
 ## `customer.customerId`
 
-Required.
+Optional.
 
-Identifier of the customer in the source or enterprise ecosystem.
+Identifier of the customer in the source system.
+
+For registered customers, this field contains the source platform
+customer identifier.
+
+For guest orders, this field may be null or omitted because the
+source platform may not have a registered customer identity.
 
 Requirements:
 
-- Must not be empty
+- When provided, must not be empty or blank
 - Maximum length: 100 characters
 
 Example:
