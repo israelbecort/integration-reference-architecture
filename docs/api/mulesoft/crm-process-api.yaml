@@ -1,0 +1,453 @@
+openapi: 3.0.3
+
+info:
+  title: CRM Process API
+  version: 1.0.0
+  description: |
+    Internal Process API responsible for synchronously orchestrating
+    canonical order processing into the CRM domain.
+
+    The API is consumed by the Integration Service and delegates
+    Salesforce-specific operations to the Salesforce System API.
+
+servers:
+  - url: http://localhost:8083
+    description: Local development
+
+tags:
+  - name: Orders
+    description: CRM order processing operations
+
+paths:
+  /api/v1/orders/{orderId}/process:
+    post:
+      tags:
+        - Orders
+      summary: Process a canonical order in CRM
+      description: |
+        Processes a canonical order synchronously in the CRM domain.
+
+        Business idempotency is based on the canonical orderId.
+
+        The public Order API Idempotency-Key is intentionally not
+        propagated to this API.
+
+        A successful response means that the CRM branch has completed.
+        It does not imply that ERP, WMS or other downstream domains have
+        completed.
+      operationId: processOrderInCrm
+
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+        - $ref: "#/components/parameters/CorrelationId"
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProcessOrderRequest"
+            examples:
+              registeredCustomer:
+                summary: Registered customer order
+                value:
+                  externalOrderId: T3JkZXI6NjlmZTA4NjYtY2U3Ni00ODI1LTlkNTYtMzAyODhlMTUyODE0
+                  customer:
+                    customerId: VXNlcjox
+                    email: customer@example.com
+                  items:
+                    - productId: UHJvZHVjdFZhcmlhbnQ6MzYy
+                      quantity: 1
+                      unitPrice: 45.00
+                  currency: USD
+                  shippingAddress:
+                    addressLine1: 813 Howard Street
+                    addressLine2: ""
+                    city: OSWEGO
+                    postalCode: "13126"
+                    country: US
+                  acceptedAt: "2026-09-10T20:03:58.857816Z"
+
+              guestCustomer:
+                summary: Guest customer order
+                value:
+                  externalOrderId: T3JkZXI6Z3Vlc3Qtb3JkZXI=
+                  customer:
+                    customerId: null
+                    email: guest@example.com
+                  items:
+                    - productId: UHJvZHVjdFZhcmlhbnQ6MzYy
+                      quantity: 1
+                      unitPrice: 45.00
+                  currency: USD
+                  shippingAddress:
+                    addressLine1: 813 Howard Street
+                    addressLine2: ""
+                    city: OSWEGO
+                    postalCode: "13126"
+                    country: US
+                  acceptedAt: "2026-09-10T20:03:58.857816Z"
+
+      responses:
+        "200":
+          description: CRM processing completed successfully
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessOrderResponse"
+              example:
+                orderId: e30c6941-c229-4234-b4a2-971176e54c20
+                externalOrderId: T3JkZXI6NjlmZTA4NjYtY2U3Ni00ODI1LTlkNTYtMzAyODhlMTUyODE0
+                status: COMPLETED
+                crmOrderId: a01XXXXXXXXXXXXXXX
+                customerReference: 003XXXXXXXXXXXXXXX
+                correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                processedAt: "2026-09-11T10:30:00Z"
+
+        "400":
+          description: Invalid request
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                errorCode: CRM-VALIDATION-001
+                message: Invalid CRM processing request
+                correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                timestamp: "2026-09-11T10:31:00Z"
+
+        "409":
+          description: Business idempotency conflict
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                errorCode: CRM-IDEMPOTENCY-001
+                message: The order identity already exists with different business content
+                correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                timestamp: "2026-09-11T10:31:00Z"
+
+        "422":
+          description: CRM domain processing failure
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                customerFailure:
+                  value:
+                    errorCode: CRM-CUSTOMER-001
+                    message: Customer cannot be processed according to CRM business rules
+                    correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                    timestamp: "2026-09-11T10:31:00Z"
+
+                orderFailure:
+                  value:
+                    errorCode: CRM-ORDER-001
+                    message: Order cannot be represented in the CRM domain
+                    correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                    timestamp: "2026-09-11T10:31:00Z"
+
+        "502":
+          description: Salesforce System API contract violation
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                errorCode: CRM-PROTOCOL-001
+                message: Salesforce System API returned an invalid response
+                correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                timestamp: "2026-09-11T10:31:00Z"
+
+        "503":
+          description: Salesforce System API temporarily unavailable
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                errorCode: CRM-DEPENDENCY-001
+                message: Salesforce System API is temporarily unavailable
+                correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                timestamp: "2026-09-11T10:31:00Z"
+
+        "500":
+          description: Unexpected internal processing failure
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                errorCode: CRM-INTERNAL-001
+                message: Unexpected CRM processing failure
+                correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                timestamp: "2026-09-11T10:31:00Z"
+
+components:
+  parameters:
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      description: Canonical Order API identifier used as the CRM business idempotency identity.
+      schema:
+        type: string
+        format: uuid
+      example: e30c6941-c229-4234-b4a2-971176e54c20
+
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: true
+      description: |
+        End-to-end observability identifier propagated unchanged through the CRM call chain.
+
+        Must contain a valid UUID. If the header is missing or malformed, the
+        request is rejected with CRM-VALIDATION-001 and the API generates a new
+        UUID only for correlating that rejected request.
+      schema:
+        type: string
+        format: uuid
+      example: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+
+  headers:
+    CorrelationId:
+      description: |
+        Same valid correlation identifier received in the request.
+
+        For a request rejected because X-Correlation-Id is missing or malformed,
+        this header contains a newly generated diagnostic correlation identifier.
+      schema:
+        type: string
+        format: uuid
+      example: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+
+  schemas:
+    ProcessOrderRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - externalOrderId
+        - customer
+        - items
+        - currency
+        - shippingAddress
+        - acceptedAt
+      properties:
+        externalOrderId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '.*\S.*'
+          description: Stable identifier of the order in the source commerce platform.
+
+        customer:
+          $ref: "#/components/schemas/Customer"
+
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/OrderItem"
+
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          pattern: "^[A-Z]{3}$"
+          example: USD
+
+        shippingAddress:
+          $ref: "#/components/schemas/ShippingAddress"
+
+        acceptedAt:
+          type: string
+          format: date-time
+          description: Timestamp when the canonical Order API originally accepted the order.
+
+    Customer:
+      type: object
+      additionalProperties: false
+      required:
+        - email
+      properties:
+        customerId:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 100
+          pattern: '.*\S.*'
+          description: |
+            Stable commerce customer identifier for registered customers.
+
+            Null or omitted for guest customers.
+
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+          description: Customer email address.
+
+    OrderItem:
+      type: object
+      additionalProperties: false
+      required:
+        - productId
+        - quantity
+        - unitPrice
+      properties:
+        productId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '.*\S.*'
+
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+
+        unitPrice:
+          type: number
+          format: double
+          minimum: 0.01
+          example: 45.00
+
+    ShippingAddress:
+      type: object
+      additionalProperties: false
+      required:
+        - addressLine1
+        - city
+        - postalCode
+        - country
+      properties:
+        addressLine1:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: '.*\S.*'
+
+        addressLine2:
+          type: string
+          maxLength: 200
+          nullable: true
+
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '.*\S.*'
+
+        postalCode:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '.*\S.*'
+
+        country:
+          type: string
+          minLength: 2
+          maxLength: 2
+          pattern: "^[A-Z]{2}$"
+          example: US
+
+    ProcessOrderResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - orderId
+        - externalOrderId
+        - status
+        - crmOrderId
+        - customerReference
+        - correlationId
+        - processedAt
+      properties:
+        orderId:
+          type: string
+          format: uuid
+
+        externalOrderId:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+        status:
+          type: string
+          enum:
+            - COMPLETED
+
+        crmOrderId:
+          type: string
+          minLength: 1
+          description: CRM order reference returned by the Salesforce System API.
+
+        customerReference:
+          type: string
+          minLength: 1
+          description: CRM customer reference returned by the Salesforce System API.
+
+        correlationId:
+          type: string
+          format: uuid
+
+        processedAt:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - errorCode
+        - message
+        - correlationId
+        - timestamp
+      properties:
+        errorCode:
+          type: string
+          enum:
+            - CRM-VALIDATION-001
+            - CRM-IDEMPOTENCY-001
+            - CRM-CUSTOMER-001
+            - CRM-ORDER-001
+            - CRM-DEPENDENCY-001
+            - CRM-PROTOCOL-001
+            - CRM-INTERNAL-001
+
+        message:
+          type: string
+          minLength: 1
+
+        correlationId:
+          type: string
+          format: uuid
+
+        timestamp:
+          type: string
+          format: date-time

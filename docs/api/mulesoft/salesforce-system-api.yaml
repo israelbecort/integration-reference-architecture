@@ -1,0 +1,688 @@
+openapi: 3.0.3
+
+info:
+  title: Salesforce System API
+  version: 1.0.0
+  description: |
+    Internal System API responsible for encapsulating Salesforce access.
+
+    The API is consumed by the CRM Process API and hides Salesforce-specific
+    objects, fields, queries, authentication and connector behavior from
+    upstream integration layers.
+
+servers:
+  - url: http://localhost:8084
+    description: Local development
+
+tags:
+  - name: Customers
+    description: Salesforce customer operations
+
+  - name: Orders
+    description: Salesforce order operations
+
+paths:
+  /api/v1/customers/upsert:
+    post:
+      tags:
+        - Customers
+      summary: Resolve and upsert a CRM customer
+      description: |
+        Resolves and persists a registered or guest CRM customer.
+
+        Registered customers are identified by their commerce customer
+        external identity.
+
+        Guest customers do not receive a fabricated commerce customer ID.
+        Their Salesforce integration identity is derived internally by the
+        System API from the normalized email address.
+      operationId: upsertCustomer
+
+      parameters:
+        - $ref: "#/components/parameters/CorrelationId"
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerUpsertRequest"
+            examples:
+              registeredCustomer:
+                summary: Registered commerce customer
+                value:
+                  customerType: REGISTERED
+                  externalCustomerId: VXNlcjox
+                  email: customer@example.com
+
+              guestCustomer:
+                summary: Guest commerce customer
+                value:
+                  customerType: GUEST
+                  email: guest@example.com
+
+      responses:
+        "200":
+          description: Customer resolved and persisted successfully
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerUpsertResponse"
+              examples:
+                existingRegisteredCustomer:
+                  value:
+                    customerReference: 003XXXXXXXXXXXXXXX
+                    customerType: REGISTERED
+                    created: false
+                    correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+
+                newGuestCustomer:
+                  value:
+                    customerReference: 003YYYYYYYYYYYYYYY
+                    customerType: GUEST
+                    created: true
+                    correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+        "409":
+          $ref: "#/components/responses/ConflictError"
+
+        "422":
+          $ref: "#/components/responses/BusinessError"
+
+        "502":
+          $ref: "#/components/responses/ProtocolError"
+
+        "503":
+          $ref: "#/components/responses/DependencyError"
+
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/orders/{orderId}:
+    put:
+      tags:
+        - Orders
+      summary: Upsert a CRM order
+      description: |
+        Creates or updates the Salesforce representation of a canonical order.
+
+        The canonical orderId is used as the Salesforce business identity and
+        external upsert key.
+
+        The operation is safe to repeat.
+      operationId: upsertOrder
+
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+        - $ref: "#/components/parameters/CorrelationId"
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderUpsertRequest"
+            example:
+              externalOrderId: T3JkZXI6NjlmZTA4NjYtY2U3Ni00ODI1LTlkNTYtMzAyODhlMTUyODE0
+              customerReference: 003XXXXXXXXXXXXXXX
+              currency: USD
+              shippingAddress:
+                addressLine1: 813 Howard Street
+                addressLine2: ""
+                city: OSWEGO
+                postalCode: "13126"
+                country: US
+              acceptedAt: "2026-09-10T20:03:58.857816Z"
+
+      responses:
+        "200":
+          description: CRM order persisted successfully
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderUpsertResponse"
+              examples:
+                newOrder:
+                  value:
+                    orderId: e30c6941-c229-4234-b4a2-971176e54c20
+                    crmOrderId: a01XXXXXXXXXXXXXXX
+                    created: true
+                    correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+
+                existingOrder:
+                  value:
+                    orderId: e30c6941-c229-4234-b4a2-971176e54c20
+                    crmOrderId: a01XXXXXXXXXXXXXXX
+                    created: false
+                    correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+        "409":
+          $ref: "#/components/responses/ConflictError"
+
+        "422":
+          $ref: "#/components/responses/BusinessError"
+
+        "502":
+          $ref: "#/components/responses/ProtocolError"
+
+        "503":
+          $ref: "#/components/responses/DependencyError"
+
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/orders/{orderId}/lines:
+    put:
+      tags:
+        - Orders
+      summary: Upsert CRM order lines
+      description: |
+        Synchronizes canonical order items into Salesforce.
+
+        Each line receives a deterministic Salesforce integration identity
+        derived by the System API from:
+
+        canonical orderId + item position + productId
+
+        This makes legitimate retries safe even when previous Salesforce
+        writes completed before a response was lost.
+      operationId: upsertOrderLines
+
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+        - $ref: "#/components/parameters/CorrelationId"
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderLinesUpsertRequest"
+            example:
+              crmOrderId: a01XXXXXXXXXXXXXXX
+              items:
+                - productId: UHJvZHVjdFZhcmlhbnQ6MzYy
+                  quantity: 1
+                  unitPrice: 45.00
+
+      responses:
+        "200":
+          description: CRM order lines persisted successfully
+          headers:
+            X-Correlation-Id:
+              $ref: "#/components/headers/CorrelationId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderLinesUpsertResponse"
+              example:
+                orderId: e30c6941-c229-4234-b4a2-971176e54c20
+                crmOrderId: a01XXXXXXXXXXXXXXX
+                processedLines: 1
+                correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+        "409":
+          $ref: "#/components/responses/ConflictError"
+
+        "422":
+          $ref: "#/components/responses/BusinessError"
+
+        "502":
+          $ref: "#/components/responses/ProtocolError"
+
+        "503":
+          $ref: "#/components/responses/DependencyError"
+
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  parameters:
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      description: Canonical Order API identifier used as the Salesforce order business identity.
+      schema:
+        type: string
+        format: uuid
+      example: e30c6941-c229-4234-b4a2-971176e54c20
+
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: true
+      description: |
+        End-to-end observability identifier propagated unchanged from the CRM Process API.
+
+        Must contain a valid UUID. If the header is missing or malformed, the
+        request is rejected with SF-VALIDATION-001 and the API generates a new
+        UUID only for correlating that rejected request.
+      schema:
+        type: string
+        format: uuid
+      example: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+
+  headers:
+    CorrelationId:
+      description: |
+        Same valid correlation identifier received in the request.
+
+        For a request rejected because X-Correlation-Id is missing or malformed,
+        this header contains a newly generated diagnostic correlation identifier.
+      schema:
+        type: string
+        format: uuid
+      example: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+
+  schemas:
+    CustomerType:
+      type: string
+      enum:
+        - REGISTERED
+        - GUEST
+
+    CustomerUpsertRequest:
+      oneOf:
+        - $ref: "#/components/schemas/RegisteredCustomerUpsertRequest"
+        - $ref: "#/components/schemas/GuestCustomerUpsertRequest"
+      discriminator:
+        propertyName: customerType
+        mapping:
+          REGISTERED: "#/components/schemas/RegisteredCustomerUpsertRequest"
+          GUEST: "#/components/schemas/GuestCustomerUpsertRequest"
+
+    RegisteredCustomerUpsertRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - customerType
+        - externalCustomerId
+        - email
+      properties:
+        customerType:
+          type: string
+          enum:
+            - REGISTERED
+
+        externalCustomerId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '.*\S.*'
+          description: Stable commerce customer identity.
+
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+
+    GuestCustomerUpsertRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - customerType
+        - email
+      properties:
+        customerType:
+          type: string
+          enum:
+            - GUEST
+
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+
+    CustomerUpsertResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - customerReference
+        - customerType
+        - created
+        - correlationId
+      properties:
+        customerReference:
+          type: string
+          minLength: 1
+          description: Salesforce customer reference.
+
+        customerType:
+          $ref: "#/components/schemas/CustomerType"
+
+        created:
+          type: boolean
+          description: True when the Salesforce record was created during this operation.
+
+        correlationId:
+          type: string
+          format: uuid
+
+    OrderUpsertRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - externalOrderId
+        - customerReference
+        - currency
+        - shippingAddress
+        - acceptedAt
+      properties:
+        externalOrderId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '.*\S.*'
+
+        customerReference:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '.*\S.*'
+          description: CRM customer reference returned by the customer operation.
+
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          pattern: "^[A-Z]{3}$"
+          example: USD
+
+        shippingAddress:
+          $ref: "#/components/schemas/ShippingAddress"
+
+        acceptedAt:
+          type: string
+          format: date-time
+
+    OrderUpsertResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - orderId
+        - crmOrderId
+        - created
+        - correlationId
+      properties:
+        orderId:
+          type: string
+          format: uuid
+
+        crmOrderId:
+          type: string
+          minLength: 1
+
+        created:
+          type: boolean
+
+        correlationId:
+          type: string
+          format: uuid
+
+    OrderLinesUpsertRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - crmOrderId
+        - items
+      properties:
+        crmOrderId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '.*\S.*'
+
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/OrderItem"
+
+    OrderLinesUpsertResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - orderId
+        - crmOrderId
+        - processedLines
+        - correlationId
+      properties:
+        orderId:
+          type: string
+          format: uuid
+
+        crmOrderId:
+          type: string
+          minLength: 1
+
+        processedLines:
+          type: integer
+          format: int32
+          minimum: 1
+
+        correlationId:
+          type: string
+          format: uuid
+
+    OrderItem:
+      type: object
+      additionalProperties: false
+      required:
+        - productId
+        - quantity
+        - unitPrice
+      properties:
+        productId:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '.*\S.*'
+
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+
+        unitPrice:
+          type: number
+          format: double
+          minimum: 0.01
+          example: 45.00
+
+    ShippingAddress:
+      type: object
+      additionalProperties: false
+      required:
+        - addressLine1
+        - city
+        - postalCode
+        - country
+      properties:
+        addressLine1:
+          type: string
+          minLength: 1
+          maxLength: 200
+          pattern: '.*\S.*'
+
+        addressLine2:
+          type: string
+          nullable: true
+          maxLength: 200
+
+        city:
+          type: string
+          minLength: 1
+          maxLength: 100
+          pattern: '.*\S.*'
+
+        postalCode:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '.*\S.*'
+
+        country:
+          type: string
+          minLength: 2
+          maxLength: 2
+          pattern: "^[A-Z]{2}$"
+          example: US
+
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - errorCode
+        - message
+        - correlationId
+        - timestamp
+      properties:
+        errorCode:
+          type: string
+          enum:
+            - SF-VALIDATION-001
+            - SF-AUTH-001
+            - SF-NOT-FOUND-001
+            - SF-CONFLICT-001
+            - SF-BUSINESS-001
+            - SF-RATE-LIMIT-001
+            - SF-DEPENDENCY-001
+            - SF-PROTOCOL-001
+            - SF-INTERNAL-001
+
+        message:
+          type: string
+          minLength: 1
+
+        correlationId:
+          type: string
+          format: uuid
+
+        timestamp:
+          type: string
+          format: date-time
+
+  responses:
+    ValidationError:
+      description: Invalid System API request
+      headers:
+        X-Correlation-Id:
+          $ref: "#/components/headers/CorrelationId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            errorCode: SF-VALIDATION-001
+            message: Invalid Salesforce System API request
+            correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+            timestamp: "2026-09-11T11:30:00Z"
+
+    ConflictError:
+      description: Salesforce business identity conflict
+      headers:
+        X-Correlation-Id:
+          $ref: "#/components/headers/CorrelationId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            errorCode: SF-CONFLICT-001
+            message: Conflicting Salesforce business identity
+            correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+            timestamp: "2026-09-11T11:30:00Z"
+
+    BusinessError:
+      description: Salesforce rejected the operation due to a non-transient CRM rule
+      headers:
+        X-Correlation-Id:
+          $ref: "#/components/headers/CorrelationId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            errorCode: SF-BUSINESS-001
+            message: Salesforce rejected the CRM operation
+            correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+            timestamp: "2026-09-11T11:30:00Z"
+
+    ProtocolError:
+      description: Salesforce returned an unusable response
+      headers:
+        X-Correlation-Id:
+          $ref: "#/components/headers/CorrelationId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            errorCode: SF-PROTOCOL-001
+            message: Salesforce returned an invalid response
+            correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+            timestamp: "2026-09-11T11:30:00Z"
+
+    DependencyError:
+      description: Salesforce dependency temporarily unavailable
+      headers:
+        X-Correlation-Id:
+          $ref: "#/components/headers/CorrelationId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            dependencyUnavailable:
+              value:
+                errorCode: SF-DEPENDENCY-001
+                message: Salesforce is temporarily unavailable
+                correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                timestamp: "2026-09-11T11:30:00Z"
+
+            rateLimit:
+              value:
+                errorCode: SF-RATE-LIMIT-001
+                message: Salesforce rate limit remains active after bounded retries
+                correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                timestamp: "2026-09-11T11:30:00Z"
+
+            authenticationFailure:
+              value:
+                errorCode: SF-AUTH-001
+                message: Salesforce authentication is unavailable
+                correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+                timestamp: "2026-09-11T11:30:00Z"
+
+    InternalError:
+      description: Unexpected Salesforce System API failure
+      headers:
+        X-Correlation-Id:
+          $ref: "#/components/headers/CorrelationId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            errorCode: SF-INTERNAL-001
+            message: Unexpected Salesforce System API failure
+            correlationId: 18bdb3ad-1075-4b65-b42e-6ee7a27d1e99
+            timestamp: "2026-09-11T11:30:00Z"
