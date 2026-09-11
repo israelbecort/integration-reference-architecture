@@ -5,6 +5,11 @@ import Fastify, {
 import rawBody from "fastify-raw-body";
 
 import {
+  createOrderApiClient,
+  type OrderApiCreateOrder,
+} from "./client/order-api.client.js";
+
+import {
   verifySaleorWebhookSignature,
   type SaleorSignatureVerifier,
 } from "./security/saleor-signature.js";
@@ -15,6 +20,7 @@ import {
 
 type BuildAppOptions = {
   verifySaleorSignature?: SaleorSignatureVerifier;
+  createOrder?: OrderApiCreateOrder;
 };
 
 export async function buildApp(
@@ -35,9 +41,14 @@ export async function buildApp(
     options.verifySaleorSignature ??
     verifySaleorWebhookSignature;
 
+  const createOrder =
+    options.createOrder ??
+    createOrderApiClient();
+
   const orderCreatedHandler =
     createOrderCreatedHandler({
       verifySignature,
+      createOrder,
     });
 
   app.get(
